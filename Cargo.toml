@@ -1,0 +1,29 @@
+[package]
+name = "alert-bloodborne-fr-live"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Alertes Discord pour les streams Twitch Bloodborne en français"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+dotenvy = "0.15"
+fs2 = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"
+
+[profile.release]
+lto = "thin"
+strip = true
