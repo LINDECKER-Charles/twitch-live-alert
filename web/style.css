@@ -343,9 +343,11 @@ input[type="number"] {
 }
 
 .check-row {
-  display: flex;
-  gap: .7rem;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  column-gap: .8rem;
+  align-items: start;
+  min-height: 2.75rem;
   padding-block: .8rem;
   border-top: 1px solid var(--divider);
   font-size: .94rem;
@@ -353,13 +355,58 @@ input[type="number"] {
   cursor: pointer;
 }
 
+.check-row:has(input:disabled) { cursor: default; }
+
+.check-row input,
+.check-mark {
+  grid-area: 1 / 1;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
 .check-row input {
-  flex: none;
-  width: 1.15rem;
-  height: 1.15rem;
-  margin: .15rem 0 0;
+  margin: 0;
   accent-color: var(--accent);
   cursor: inherit;
+}
+
+.check-mark { display: none; }
+
+@media (forced-colors: none) {
+  .check-row input {
+    appearance: none;
+    border: 1px solid var(--outline);
+    border-radius: 5px;
+    background: var(--surface);
+    transition: background-color 140ms ease, border-color 140ms ease;
+  }
+
+  .check-row:hover input:enabled { border-color: var(--accent); }
+
+  .check-row input:checked {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+
+  .check-row:hover input:checked:enabled {
+    border-color: var(--focus);
+    background: var(--focus);
+  }
+
+  .check-row input:checked + .check-mark {
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+
+  .check-mark::before {
+    content: "";
+    width: .42rem;
+    height: .75rem;
+    border: solid var(--background);
+    border-width: 0 2px 2px 0;
+    transform: translateY(-1px) rotate(45deg);
+  }
 }
 
 .check-row small {
@@ -433,5 +480,6 @@ footer {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  button { transition: none; }
+  button,
+  .check-row input { transition: none; }
 }

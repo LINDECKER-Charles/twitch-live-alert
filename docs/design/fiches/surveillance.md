@@ -24,3 +24,5 @@ Le joueur consulte les directs, vérifie la réception d’une notification Wind
 | Clavier | Ordre du document, focus visible, contrôles natifs et retours annoncés. |
 
 Décision du 20 novembre 2026. La page combine l’état et les réglages dans une seule vue pour permettre de vérifier l’effet d’une action sans naviguer.
+
+Retouche du 20 novembre 2026 : les deux cases gardent leur fonctionnement natif et la validation par Enregistrer. Leur présentation utilise un carré de 24 px aux angles adoucis, une coche contrastée sur fond laiton et un focus visible. Le mode de couleurs forcées reprend le contrôle du navigateur. Rendu contrôlé à 1280 px et 390 px ; sélection par Espace et navigation par Tab vérifiées dans l’application locale.
