@@ -1,11 +1,10 @@
 use crate::{
-    discord::{self, Discord},
     http,
+    notification::{NotificationError, Notifier, toast_xml},
     store::Store,
-    twitch::Twitch,
+    twitch::{Stream, Twitch},
     watcher::Watcher,
 };
-use reqwest::Url;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
@@ -20,7 +19,6 @@ use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
     matchers::{header, method, path, query_param},
 };
-
 fn stream(id: &str) -> Value {
     json!({
         "id": id, "user_login": format!("hunter_{id}"), "user_name": "Chasseur",
@@ -85,79 +83,67 @@ async fn streams_sequence(server: &MockServer, responses: Vec<ResponseTemplate>)
         .await;
 }
 
-async fn discord_sequence(server: &MockServer, responses: Vec<ResponseTemplate>) {
-    let responses = Arc::new(Mutex::new(VecDeque::from(responses)));
-    Mock::given(method("POST"))
-        .and(path("/webhook"))
-        .and(query_param("wait", "true"))
-        .respond_with(move |_: &Request| {
-            let mut responses = responses.lock().unwrap();
-            if responses.len() > 1 {
-                responses.pop_front().unwrap()
-            } else {
-                responses.front().unwrap().clone()
-            }
-        })
-        .mount(server)
-        .await;
+#[derive(Clone, Default)]
+struct FakeNotifier {
+    attempts: Arc<Mutex<Vec<Stream>>>,
+    failures: Arc<Mutex<VecDeque<bool>>>,
+    delay: Duration,
 }
-
-fn confirmed() -> ResponseTemplate {
-    ResponseTemplate::new(200).set_body_json(json!({"id":"discord-message"}))
-}
-
-fn watcher(server: &MockServer, dir: &TempDir, notify_existing: bool) -> Watcher {
-    let client = http::client().unwrap();
-    Watcher {
-        twitch: Twitch::for_test(client.clone(), &server.uri()),
-        discord: Discord::new(
-            client,
-            Url::parse(&format!("{}/webhook", server.uri())).unwrap(),
-        ),
-        store: Store::open(&dir.path().join("state.sqlite3")).unwrap(),
-        notify_existing,
+impl Notifier for FakeNotifier {
+    async fn notify(&self, stream: &Stream) -> anyhow::Result<()> {
+        self.attempts.lock().unwrap().push(stream.clone());
+        if !self.delay.is_zero() {
+            tokio::time::sleep(self.delay).await;
+        }
+        if self.failures.lock().unwrap().pop_front().unwrap_or(false) {
+            return Err(NotificationError("échec simulé".into()).into());
+        }
+        Ok(())
     }
 }
 
-async fn notifications(server: &MockServer) -> Vec<Value> {
-    server
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .filter(|r| r.url.path() == "/webhook")
-        .map(|r| serde_json::from_slice(&r.body).unwrap())
-        .collect()
+fn watcher(server: &MockServer, dir: &TempDir, notify_existing: bool) -> Watcher<FakeNotifier> {
+    Watcher {
+        twitch: Twitch::for_test(http::client().unwrap(), &server.uri()),
+        notifier: FakeNotifier::default(),
+        store: Store::open(&dir.path().join("state.sqlite3")).unwrap(),
+        notify_existing,
+        last_streams: Vec::new(),
+    }
 }
 
 #[tokio::test]
-async fn full_pipeline_filters_french_and_game_and_follows_short_pages() {
+async fn pipeline_filters_language_and_game_and_follows_empty_pages() {
     let server = twitch_server().await;
     let dir = TempDir::new().unwrap();
     let mut english = stream("2");
     english["language"] = json!("en");
     english["title"] = json!("[FR] Bloodborne");
-    let mut other_game = stream("3");
-    other_game["game_id"] = json!("other");
+    let mut other = stream("3");
+    other["game_id"] = json!("other");
     let mut offline = stream("4");
     offline["type"] = json!("");
-    streams_sequence(&server, vec![
-        ResponseTemplate::new(200).set_body_json(json!({"data": [stream("1"), english, other_game, offline], "pagination": {"cursor":"next"}})),
-        ResponseTemplate::new(200).set_body_json(json!({"data": [], "pagination": {"cursor":"last"}})),
-        page(vec![stream("1"), stream("5")]),
-    ]).await;
-    discord_sequence(&server, vec![confirmed()]).await;
+    streams_sequence(
+        &server,
+        vec![
+            ResponseTemplate::new(200).set_body_json(
+                json!({"data":[stream("1"),english,other,offline],"pagination":{"cursor":"next"}}),
+            ),
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"data":[],"pagination":{"cursor":"last"}})),
+            page(vec![stream("1"), stream("5")]),
+        ],
+    )
+    .await;
     let mut watcher = watcher(&server, &dir, true);
     assert_eq!(watcher.cycle().await.unwrap(), 2);
-    assert!(watcher.store.contains("1").unwrap());
+    {
+        let attempts = watcher.notifier.attempts.lock().unwrap();
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].url(), "https://www.twitch.tv/hunter_1");
+    }
     assert!(!watcher.store.contains("2").unwrap());
-    let messages = notifications(&server).await;
-    assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0]["allowed_mentions"]["parse"], json!([]));
-    assert_eq!(
-        messages[0]["embeds"][0]["url"],
-        "https://www.twitch.tv/hunter_1"
-    );
+    assert_eq!(watcher.last_streams.len(), 2);
     let requests = server.received_requests().await.unwrap();
     assert!(requests.iter().any(|r| {
         r.url
@@ -191,7 +177,6 @@ async fn notifications_survive_restart_and_temporary_disappearance() {
         ],
     )
     .await;
-    discord_sequence(&server, vec![confirmed()]).await;
     let mut first = watcher(&server, &dir, true);
     assert_eq!(first.cycle().await.unwrap(), 1);
     drop(first);
@@ -199,11 +184,11 @@ async fn notifications_survive_restart_and_temporary_disappearance() {
     assert_eq!(restarted.cycle().await.unwrap(), 0);
     assert_eq!(restarted.cycle().await.unwrap(), 0);
     assert_eq!(restarted.cycle().await.unwrap(), 1);
-    assert_eq!(notifications(&server).await.len(), 2);
+    assert_eq!(restarted.notifier.attempts.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
-async fn detects_entry_into_category_and_suppresses_title_changes() {
+async fn detects_category_entry_without_repeating_title_changes() {
     let server = twitch_server().await;
     let dir = TempDir::new().unwrap();
     let mut renamed = stream("1");
@@ -213,7 +198,6 @@ async fn detects_entry_into_category_and_suppresses_title_changes() {
         vec![page(vec![]), page(vec![stream("1")]), page(vec![renamed])],
     )
     .await;
-    discord_sequence(&server, vec![confirmed()]).await;
     let mut watcher = watcher(&server, &dir, true);
     assert_eq!(watcher.cycle().await.unwrap(), 0);
     assert_eq!(watcher.cycle().await.unwrap(), 1);
@@ -232,73 +216,36 @@ async fn baseline_is_only_taken_once_and_persists() {
         ],
     )
     .await;
-    discord_sequence(&server, vec![confirmed()]).await;
     let mut first = watcher(&server, &dir, false);
     assert_eq!(first.cycle().await.unwrap(), 0);
-    assert!(first.store.contains("1").unwrap());
     drop(first);
     let mut restarted = watcher(&server, &dir, false);
     assert_eq!(restarted.cycle().await.unwrap(), 1);
-    assert_eq!(notifications(&server).await.len(), 1);
+    assert_eq!(restarted.notifier.attempts.lock().unwrap()[0].id, "2");
 }
 
 #[tokio::test]
-async fn failed_delivery_retries_without_repeating_successes() {
+async fn failed_notification_retries_without_repeating_successes() {
     let server = twitch_server().await;
     let dir = TempDir::new().unwrap();
     streams_sequence(&server, vec![page(vec![stream("1"), stream("2")])]).await;
-    discord_sequence(
-        &server,
-        vec![confirmed(), ResponseTemplate::new(503), confirmed()],
-    )
-    .await;
     let mut watcher = watcher(&server, &dir, true);
+    *watcher.notifier.failures.lock().unwrap() = VecDeque::from([false, true, false]);
     assert!(watcher.cycle().await.is_err());
     assert!(watcher.store.contains("1").unwrap());
     assert!(!watcher.store.contains("2").unwrap());
     assert_eq!(watcher.cycle().await.unwrap(), 1);
-    let messages = notifications(&server).await;
-    assert_eq!(messages.len(), 3);
     assert_eq!(
-        messages[1]["embeds"][0]["url"],
-        messages[2]["embeds"][0]["url"]
+        watcher
+            .notifier
+            .attempts
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>(),
+        ["1", "2", "2"]
     );
-}
-
-#[tokio::test]
-async fn discord_rate_limit_is_respected_and_not_recorded_as_sent() {
-    let server = twitch_server().await;
-    let dir = TempDir::new().unwrap();
-    streams_sequence(&server, vec![page(vec![stream("1"), stream("2")])]).await;
-    discord_sequence(
-        &server,
-        vec![ResponseTemplate::new(429).set_body_json(json!({"retry_after":120.5}))],
-    )
-    .await;
-    let mut watcher = watcher(&server, &dir, true);
-    let error = watcher.cycle().await.unwrap_err();
-    assert_eq!(
-        http::retry_delay(&error, 1, Duration::from_secs(60)),
-        Duration::from_secs_f64(120.5)
-    );
-    assert!(!watcher.store.contains("1").unwrap());
-    assert_eq!(notifications(&server).await.len(), 1);
-}
-
-#[tokio::test]
-async fn discord_requires_message_confirmation_even_on_success_status() {
-    for response in [
-        ResponseTemplate::new(204),
-        ResponseTemplate::new(200).set_body_json(json!({"id":""})),
-    ] {
-        let server = twitch_server().await;
-        let dir = TempDir::new().unwrap();
-        streams_sequence(&server, vec![page(vec![stream("1")])]).await;
-        discord_sequence(&server, vec![response]).await;
-        let mut watcher = watcher(&server, &dir, true);
-        assert!(watcher.cycle().await.is_err());
-        assert!(!watcher.store.contains("1").unwrap());
-    }
 }
 
 #[tokio::test]
@@ -309,7 +256,7 @@ async fn incomplete_snapshot_never_initializes_baseline() {
         &server,
         vec![
             ResponseTemplate::new(200)
-                .set_body_json(json!({"data":[stream("1")], "pagination":{"cursor":"next"}})),
+                .set_body_json(json!({"data":[stream("1")],"pagination":{"cursor":"next"}})),
             ResponseTemplate::new(500),
             page(vec![stream("1"), stream("2")]),
         ],
@@ -320,11 +267,11 @@ async fn incomplete_snapshot_never_initializes_baseline() {
     assert!(!watcher.store.contains("1").unwrap());
     assert_eq!(watcher.cycle().await.unwrap(), 0);
     assert!(watcher.store.contains("2").unwrap());
-    assert!(notifications(&server).await.is_empty());
+    assert!(watcher.notifier.attempts.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn repeated_cursor_fails_without_partial_state() {
+async fn repeated_cursor_does_not_touch_state() {
     let server = twitch_server().await;
     let dir = TempDir::new().unwrap();
     streams_sequence(
@@ -345,9 +292,49 @@ async fn repeated_cursor_fails_without_partial_state() {
             .contains("pagination")
     );
     assert!(!watcher.store.contains("1").unwrap());
-    assert!(notifications(&server).await.is_empty());
+    assert!(watcher.notifier.attempts.lock().unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn shutdown_finishes_current_notification_and_persists_it() {
+    let server = twitch_server().await;
+    let dir = TempDir::new().unwrap();
+    streams_sequence(&server, vec![page(vec![stream("1"), stream("2")])]).await;
+    let mut watcher = watcher(&server, &dir, true);
+    watcher.notifier.delay = Duration::from_millis(100);
+    let attempts = watcher.notifier.attempts.clone();
+    let (sender, mut receiver) = tokio::sync::watch::channel(false);
+    let stop = tokio::spawn(async move {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while attempts.lock().unwrap().is_empty() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        sender.send(true).unwrap();
+    });
+    assert_eq!(watcher.cycle_with_shutdown(&mut receiver).await.unwrap(), 1);
+    stop.await.unwrap();
+    assert!(watcher.store.contains("1").unwrap());
+    assert!(!watcher.store.contains("2").unwrap());
+    assert_eq!(watcher.cycle().await.unwrap(), 1);
+}
+
+#[test]
+fn native_toast_escapes_untrusted_text_and_opens_twitch_by_protocol() {
+    let xml = toast_xml(
+        "A < B & C",
+        "</text><action/>\0 🩸",
+        "https://www.twitch.tv/hunter_1",
+    );
+    assert!(xml.contains("A &lt; B &amp; C"));
+    assert!(xml.contains("&lt;/text&gt;&lt;action/&gt;"));
+    assert!(!xml.contains('\0'));
+    assert!(xml.contains("activationType=\"protocol\" launch=\"https://www.twitch.tv/hunter_1\""));
+    assert!(xml.contains("content=\"Voir sur Twitch\""));
+    assert!(toast_xml("T", &"🩸".repeat(20000), "https://www.twitch.tv/test").len() < 4000);
+}
 #[tokio::test]
 async fn unauthorized_streams_refreshes_token_once() {
     let server = twitch_server().await;
@@ -445,14 +432,14 @@ async fn malformed_and_http_error_bodies_never_expose_secrets() {
 }
 
 #[tokio::test]
-async fn transport_errors_do_not_expose_webhook_path() {
+async fn transport_errors_do_not_expose_request_path() {
     let error = http::client()
         .unwrap()
         .post("http://127.0.0.1:1/private-secret")
         .send()
         .await
         .unwrap_err();
-    let safe = http::transport(error, "Discord");
+    let safe = http::transport(error, "Twitch");
     assert!(!format!("{safe:?} {safe:#}").contains("private-secret"));
 }
 
@@ -470,18 +457,6 @@ fn sqlite_prevents_two_instances_and_rejects_corruption() {
 }
 
 #[test]
-fn discord_payload_neutralizes_mentions_and_limits_unicode() {
-    let mut value = stream("1");
-    value["title"] = json!(format!("@everyone **hello** {}", "🩸".repeat(5000)));
-    let stream = serde_json::from_value(value).unwrap();
-    let payload = discord::payload(&stream);
-    assert_eq!(payload["allowed_mentions"]["parse"], json!([]));
-    let description = payload["embeds"][0]["description"].as_str().unwrap();
-    assert!(description.contains("\\*\\*hello\\*\\*"));
-    assert!(description.encode_utf16().count() <= 2000);
-}
-
-#[test]
 fn exponential_backoff_is_bounded_without_ignoring_poll_interval() {
     let error = anyhow::anyhow!("test");
     assert_eq!(
@@ -492,42 +467,6 @@ fn exponential_backoff_is_bounded_without_ignoring_poll_interval() {
         http::retry_delay(&error, u32::MAX, Duration::from_secs(60)),
         Duration::from_secs(320)
     );
-}
-
-#[tokio::test]
-async fn graceful_stop_finishes_inflight_delivery_and_stops_before_next() {
-    let server = twitch_server().await;
-    let dir = TempDir::new().unwrap();
-    streams_sequence(&server, vec![page(vec![stream("1"), stream("2")])]).await;
-    let started = Arc::new(AtomicUsize::new(0));
-    let count = started.clone();
-    Mock::given(method("POST"))
-        .and(path("/webhook"))
-        .respond_with(move |_: &Request| {
-            count.fetch_add(1, Ordering::SeqCst);
-            confirmed().set_delay(Duration::from_millis(100))
-        })
-        .mount(&server)
-        .await;
-    let (sender, mut receiver) = tokio::sync::watch::channel(false);
-    let stop = tokio::spawn(async move {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while started.load(Ordering::SeqCst) == 0 {
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        })
-        .await
-        .unwrap();
-        sender.send(true).unwrap();
-    });
-    let mut watcher = watcher(&server, &dir, true);
-    assert_eq!(watcher.cycle_with_shutdown(&mut receiver).await.unwrap(), 1);
-    stop.await.unwrap();
-    assert!(watcher.store.contains("1").unwrap());
-    assert!(!watcher.store.contains("2").unwrap());
-    assert_eq!(notifications(&server).await.len(), 1);
-    assert_eq!(watcher.cycle().await.unwrap(), 1);
-    assert_eq!(notifications(&server).await.len(), 2);
 }
 
 #[tokio::test]

@@ -37,7 +37,7 @@ pub fn client() -> Result<Client> {
         .build()?)
 }
 
-// Never propagate reqwest's error: its URL can contain a Discord webhook token.
+// Never propagate request URLs or remote response bodies into logs.
 pub fn transport(error: reqwest::Error, service: &'static str) -> anyhow::Error {
     ApiError {
         service,
@@ -72,7 +72,7 @@ pub async fn checked(response: Response, service: &'static str) -> Result<Respon
                 Duration::from_secs(reset.saturating_sub(unix_seconds()).saturating_add(1))
             });
         if retry_after.is_none() {
-            // Discord may send a fractional retry_after only in the JSON body.
+            // Some API gateways provide a fractional retry_after in the JSON body.
             if let Ok(body) = response.json::<serde_json::Value>().await {
                 retry_after = body
                     .get("retry_after")

@@ -5,7 +5,8 @@
 | Chemins | Scope |
 | --- | --- |
 | `src/**`, `tests/**`, `Cargo.toml`, `Cargo.lock` | `service` |
-| `Dockerfile`, `compose.yaml`, `.dockerignore` | `infra` |
+| `scripts/**` | `infra` |
+| `web/**` | `front` |
 | `.github/**` | `ci` |
-| `README.md`, `.env.example` | `docs` |
+| `README.md`, `.env.example`, `docs/**` | `docs` |
 | `.gitignore`, `AGENTS.md` | `chore` |

@@ -10,7 +10,6 @@ fn cli(dir: &Path, args: &[&str], vars: &[(&str, &str)]) -> Output {
     for key in [
         "TWITCH_CLIENT_ID",
         "TWITCH_CLIENT_SECRET",
-        "DISCORD_WEBHOOK_URL",
         "POLL_INTERVAL_SECONDS",
         "DATABASE_PATH",
         "NOTIFY_EXISTING_ON_FIRST_RUN",
@@ -58,10 +57,6 @@ fn configuration_check_is_offline_and_does_not_echo_secrets() {
         &[
             ("TWITCH_CLIENT_ID", "test-client"),
             ("TWITCH_CLIENT_SECRET", "private-secret"),
-            (
-                "DISCORD_WEBHOOK_URL",
-                "https://discord.com/api/webhooks/123/private-token",
-            ),
         ],
     );
     assert!(output.status.success());
@@ -71,20 +66,5 @@ fn configuration_check_is_offline_and_does_not_echo_secrets() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!text.contains("private-secret"));
-    assert!(!text.contains("private-token"));
     assert!(!dir.path().join("data").exists());
-}
-
-#[test]
-fn test_notification_only_requires_discord_credentials() {
-    let dir = TempDir::new().unwrap();
-    let output = cli(dir.path(), &["--test-notification"], &[]);
-    assert!(!output.status.success());
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(text.contains("DISCORD_WEBHOOK_URL"));
-    assert!(!text.contains("TWITCH_CLIENT_ID"));
 }

@@ -1,7 +1,8 @@
 use alert_bloodborne_fr_live::{
     config::{Config, Mode},
-    discord::Discord,
     http,
+    notification::DesktopNotifier,
+    runtime,
     store::Store,
     twitch::Twitch,
     watcher::Watcher,
@@ -14,9 +15,9 @@ use tracing_subscriber::EnvFilter;
 #[derive(Parser)]
 #[command(
     version,
-    about = "Alertes Discord pour tous les lives Twitch Bloodborne déclarés en français"
+    about = "Notifications Windows pour tous les lives Twitch Bloodborne déclarés en français"
 )]
-#[command(group(clap::ArgGroup::new("mode").args(["once", "dry_run", "test_notification", "check_config"]).multiple(false)))]
+#[command(group(clap::ArgGroup::new("mode").args(["once", "dry_run", "test_notification", "check_config", "no_web"]).multiple(false)))]
 struct Args {
     /// Exécuter un seul cycle de surveillance puis quitter
     #[arg(long)]
@@ -24,22 +25,31 @@ struct Args {
     /// Afficher les lives correspondants sans envoyer d'alerte ni modifier la base
     #[arg(long)]
     dry_run: bool,
-    /// Envoyer un message de test Discord, sans contacter Twitch
+    /// Afficher une notification Windows de test, sans contacter Twitch
     #[arg(long)]
     test_notification: bool,
     /// Valider la configuration sans réseau ni création de base
     #[arg(long)]
     check_config: bool,
+    /// Détacher la console pour un lancement discret sous Windows
+    #[arg(long)]
+    background: bool,
+    /// Surveiller dans le terminal sans démarrer l'interface web
+    #[arg(long)]
+    no_web: bool,
 }
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let args = Args::parse();
-    if let Err(error) = load_dotenv() {
-        eprintln!("{error:#}");
-        return std::process::ExitCode::FAILURE;
+    if args.background {
+        #[cfg(windows)]
+        unsafe {
+            let _ = windows::Win32::System::Console::FreeConsole();
+        }
     }
-    // Third-party HTTP tracing can expose webhook URLs even at debug level.
+    let dotenv = load_dotenv();
+    // Keep third-party HTTP tracing from exposing credentials.
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"))
         .add_directive("reqwest=off".parse().unwrap())
@@ -52,7 +62,7 @@ async fn main() -> std::process::ExitCode {
         .with_env_filter(filter)
         .with_target(false)
         .init();
-    match run(args).await {
+    match run(args, dotenv).await {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
             error!("{error:#}");
@@ -61,7 +71,15 @@ async fn main() -> std::process::ExitCode {
     }
 }
 
-async fn run(args: Args) -> Result<()> {
+async fn run(args: Args, dotenv: Result<()>) -> Result<()> {
+    if !(args.check_config || args.test_notification || args.dry_run || args.once || args.no_web) {
+        return runtime::serve(
+            dotenv.and_then(|()| Config::from_env(Mode::Watch)),
+            shutdown_signal(),
+        )
+        .await;
+    }
+    dotenv?;
     let mode = if args.test_notification {
         Mode::TestNotification
     } else if args.dry_run {
@@ -74,16 +92,17 @@ async fn run(args: Args) -> Result<()> {
         info!("Configuration valide (aucun appel réseau effectué)");
         return Ok(());
     }
-    let client = http::client()?;
     if args.test_notification {
-        Discord::new(client, config.webhook.expect("validated webhook"))
-            .test_notification()
-            .await?;
-        info!("Message de test confirmé par Discord");
+        DesktopNotifier::new()?.test_notification()?;
+        info!("Notification de test transmise à Windows");
         return Ok(());
     }
-    let mut twitch = Twitch::new(client.clone(), config.client_id, config.client_secret);
+    if args.no_web {
+        return runtime::watch_in_terminal(config, shutdown_signal()).await;
+    }
+    let twitch = Twitch::new(http::client()?, config.client_id, config.client_secret);
     if args.dry_run {
+        let mut twitch = twitch;
         let streams = twitch.french_bloodborne_streams().await?;
         for stream in &streams {
             println!(
@@ -101,61 +120,12 @@ async fn run(args: Args) -> Result<()> {
     }
     let mut watcher = Watcher {
         twitch,
-        discord: Discord::new(client, config.webhook.expect("validated webhook")),
+        notifier: DesktopNotifier::new()?,
         store: Store::open(&config.database_path)?,
         notify_existing: config.notify_existing,
+        last_streams: Vec::new(),
     };
-    if args.once {
-        watcher.cycle().await?;
-        return Ok(());
-    }
-    info!(
-        interval_seconds = config.poll_interval.as_secs(),
-        "Surveillance Bloodborne français démarrée"
-    );
-    let shutdown = shutdown_signal();
-    tokio::pin!(shutdown);
-    let (stop_sender, mut stop_receiver) = tokio::sync::watch::channel(false);
-    let mut failures = 0u32;
-    loop {
-        let result = {
-            let cycle = watcher.cycle_with_shutdown(&mut stop_receiver);
-            tokio::pin!(cycle);
-            tokio::select! {
-                biased;
-                result = &mut shutdown => {
-                    result?;
-                    info!("Arrêt demandé, confirmation de l'envoi en cours avant sortie");
-                    let _ = stop_sender.send(true);
-                    // Finish any Discord POST already in flight, including its SQLite write.
-                    cycle.await?;
-                    break;
-                },
-                result = &mut cycle => result,
-            }
-        };
-        let delay = match result {
-            Ok(_) => {
-                failures = 0;
-                config.poll_interval
-            }
-            Err(error) => {
-                // State failures must stop the process to avoid repeated unrecorded deliveries.
-                if error.downcast_ref::<http::ApiError>().is_none() {
-                    return Err(error);
-                }
-                failures = failures.saturating_add(1);
-                let delay = http::retry_delay(&error, failures, config.poll_interval);
-                error!(retry_seconds = delay.as_secs_f64(), "{error:#}");
-                delay
-            }
-        };
-        tokio::select! {
-            result = &mut shutdown => { result?; break; },
-            _ = tokio::time::sleep(delay) => {},
-        }
-    }
-    info!("Surveillance arrêtée");
+    watcher.cycle().await?;
     Ok(())
 }
 

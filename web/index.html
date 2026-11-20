@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Bloodborne FR Live</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div class="emblem" aria-hidden="true"></div>
+      <div>
+        <h1>Bloodborne <span>FR Live</span></h1>
+        <p>Le guet des directs Bloodborne en français sur Twitch.</p>
+      </div>
+    </header>
+
+    <section class="watch" aria-labelledby="watch-heading">
+      <div class="watch-overview">
+        <div>
+          <h2 id="watch-heading">Surveillance</h2>
+          <p id="watch-detail">Connexion au service local…</p>
+        </div>
+        <span class="status-pill" id="monitor-state" data-tone="quiet" role="status">Connexion</span>
+      </div>
+      <p class="notice" id="watch-error" role="status" hidden></p>
+      <dl class="watch-facts">
+        <div><dt>Dernière vérification</dt><dd id="last-check">—</dd></div>
+        <div><dt>Prochaine vérification</dt><dd id="next-check">—</dd></div>
+        <div><dt>Notifications Windows</dt><dd id="notification-state">—</dd></div>
+      </dl>
+      <div class="watch-actions">
+        <div class="button-row">
+          <button id="check-now" class="button-primary" type="button" disabled>Vérifier maintenant</button>
+          <button id="toggle-monitor" type="button" disabled>Mettre en pause</button>
+          <button id="test-notification" class="button-quiet" type="button" disabled>Tester une notification</button>
+        </div>
+        <p class="feedback" id="watch-feedback" role="status"></p>
+      </div>
+    </section>
+
+    <div class="workspace">
+      <section class="section" aria-labelledby="live-heading">
+        <header class="section-heading">
+          <h2 id="live-heading">Directs détectés</h2>
+          <span class="section-count" id="stream-count" hidden></span>
+        </header>
+        <p class="list-message" id="stream-message">Chargement des directs…</p>
+        <ul class="entries" id="stream-list"></ul>
+      </section>
+
+      <section class="section settings" aria-labelledby="settings-heading">
+        <header class="section-heading">
+          <h2 id="settings-heading">Réglages</h2>
+        </header>
+        <form id="settings-form">
+          <fieldset id="settings-fields" disabled>
+            <div class="interval-row">
+              <label for="poll-interval">Intervalle de vérification</label>
+              <div class="interval-input">
+                <input id="poll-interval" type="number" min="15" max="3600" step="1" inputmode="numeric" required
+                  aria-describedby="interval-unit interval-range">
+                <span id="interval-unit">secondes</span>
+              </div>
+              <p class="field-help" id="interval-range">De 15 à 3 600 secondes.</p>
+            </div>
+            <label class="check-row">
+              <input type="checkbox" id="notify-first">
+              <span>
+                <span>M’avertir des directs déjà en cours</span>
+                <small>Lors de la première vérification Twitch sur une installation neuve.</small>
+              </span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="start-windows">
+              <span>
+                <span>Lancer avec Windows</span>
+                <small>Ouvre la surveillance à l’ouverture de session.</small>
+              </span>
+            </label>
+          </fieldset>
+          <div class="settings-actions">
+            <button id="save-settings" class="button-primary" type="submit" disabled>Enregistrer</button>
+            <p class="feedback" id="settings-feedback" role="status"></p>
+          </div>
+        </form>
+      </section>
+
+      <section class="section history" aria-labelledby="history-heading">
+        <header class="section-heading">
+          <h2 id="history-heading">Notifications récentes</h2>
+        </header>
+        <p class="list-message" id="history-message">Chargement de l’historique…</p>
+        <ul class="entries" id="notification-list"></ul>
+      </section>
+    </div>
+
+    <noscript><p class="notice">Activez JavaScript pour accéder à la surveillance et aux réglages.</p></noscript>
+    <footer>
+      <span>Bloodborne FR Live</span>
+      <span id="app-version"></span>
+    </footer>
+  </main>
+</body>
+</html>
