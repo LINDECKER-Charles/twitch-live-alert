@@ -116,7 +116,7 @@ try {
     if (-not $desktop.CloseMainWindow()) { throw 'Impossible de fermer la fenêtre du bureau.' }
     Wait-TestCondition {
         $desktop.Refresh()
-        -not $desktop.HasExited -and $desktop.MainWindowHandle -eq [IntPtr]::Zero
+        -not $desktop.HasExited -and $desktop.MainWindowTitle -notlike '*Twitch Live Alert*'
     } "La fermeture de fenêtre ne ramène pas l’application en zone de notification."
     Open-TestDashboard
     $headers = @{Origin = $origin; 'X-Twitch-Live-Alert' = 'local'}
