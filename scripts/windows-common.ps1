@@ -1,5 +1,5 @@
 ﻿$repoRoot = Split-Path -Parent $PSScriptRoot
-$watcherExe = Join-Path $repoRoot 'target\release\alert-bloodborne-fr-live.exe'
+$watcherExe = Join-Path $repoRoot 'target\release\twitch-live-alert.exe'
 $dataDir = Join-Path $repoRoot 'data'
 $processRecord = Join-Path $dataDir 'watcher-process.json'
 $controlLock = Join-Path $dataDir 'watcher-control.lock'
@@ -68,7 +68,7 @@ function Get-VerifiedWatcherProcess([int]$ProcessId, [long]$StartUtcTicks, [swit
         }
         $allowedPaths = @($watcherExe)
         if ($IncludeDebug) {
-            $allowedPaths += Join-Path $repoRoot 'target\debug\alert-bloodborne-fr-live.exe'
+            $allowedPaths += Join-Path $repoRoot 'target\debug\twitch-live-alert.exe'
         }
         if ($process.MainModule.FileName -notin $allowedPaths) {
             return
@@ -90,10 +90,25 @@ function Get-VerifiedWatcherProcess([int]$ProcessId, [long]$StartUtcTicks, [swit
     }
 }
 
-function Get-WatcherWebStatus {
+function Get-WatcherListenerId {
+    $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object {
+        $_.LocalPort -eq 37219 -and $_.LocalAddress -in '127.0.0.1', '0.0.0.0'
+    })
+    if ($listeners.Count -gt 1) {
+        throw "Plusieurs applications écoutent sur le port 37219."
+    }
+    if ($listeners.Count -eq 1) {
+        return $listeners[0].OwningProcess
+    }
+}
+
+function Get-WatcherWebStatus([Diagnostics.Process]$Process) {
+    if ($Process.HasExited -or (Get-WatcherListenerId) -ne $Process.Id) {
+        return
+    }
     try {
-        $status = Invoke-RestMethod -UseBasicParsing -Uri "$watcherUrl/api/status" -TimeoutSec 1 -MaximumRedirection 0
-        if ($status.app_id -ceq 'bloodborne-fr-live') {
+        $status = Invoke-RestMethod -UseBasicParsing -Uri "$watcherUrl/api/status" -TimeoutSec 2 -MaximumRedirection 0
+        if ($status.app_id -ceq 'twitch-live-alert' -and $status.process_id -eq $Process.Id -and -not $Process.HasExited) {
             return $status
         }
     } catch {
@@ -102,17 +117,15 @@ function Get-WatcherWebStatus {
 }
 
 function Get-ExistingWatcherWeb {
-    $status = Get-WatcherWebStatus
-    $processId = 0
-    if (-not [int]::TryParse([string]$status.process_id, [ref]$processId) -or $processId -le 0) {
+    $listenerId = Get-WatcherListenerId
+    if (-not $listenerId) {
         return
     }
-
-    try {
-        return Get-VerifiedWatcherProcess $processId -IncludeDebug
-    } catch {
-        # Une instance d'une autre session n'est pas gérée par ce lanceur.
+    $process = Get-VerifiedWatcherProcess $listenerId -IncludeDebug
+    if ($null -eq $process) {
+        throw "Le port 37219 est occupé par une autre application (PID $listenerId)."
     }
+    return $process
 }
 
 function Wait-WatcherWeb([Diagnostics.Process]$Process) {
@@ -122,7 +135,7 @@ function Wait-WatcherWeb([Diagnostics.Process]$Process) {
             throw "Le binaire s'est arrêté (code $($Process.ExitCode)). Consultez les journaux dans $dataDir."
         }
 
-        $status = Get-WatcherWebStatus
+        $status = Get-WatcherWebStatus $Process
         if ($status.process_id -eq $Process.Id) {
             return
         }
@@ -134,12 +147,12 @@ function Wait-WatcherWeb([Diagnostics.Process]$Process) {
 
 function Request-WatcherShutdown([Diagnostics.Process]$Process) {
     try {
-        $status = Get-WatcherWebStatus
+        $status = Get-WatcherWebStatus $Process
         if ($status.process_id -ne $Process.Id) {
             return $false
         }
 
-        $headers = @{ Origin = $watcherUrl; 'X-Bloodborne-Request' = 'local' }
+        $headers = @{ Origin = $watcherUrl; 'X-Twitch-Live-Alert' = 'local' }
         $response = Invoke-WebRequest -UseBasicParsing -Uri "$watcherUrl/api/shutdown" -Method Post `
             -ContentType 'application/json' -Headers $headers -Body '{}' -TimeoutSec 3 -MaximumRedirection 0
         return $response.StatusCode -eq 202
@@ -154,7 +167,7 @@ function Get-WatcherShortcutPath([Environment+SpecialFolder]$Folder) {
         throw 'Dossier du raccourci introuvable pour ce compte Windows.'
     }
 
-    return Join-Path $shortcutDir 'Bloodborne FR Live.lnk'
+    return Join-Path $shortcutDir 'Twitch Live Alert.lnk'
 }
 
 function Get-WatcherShortcutArguments([switch]$NoBrowser) {
@@ -184,7 +197,7 @@ function Get-WatcherShortcut([Environment+SpecialFolder]$Folder, [switch]$NoBrow
     $shortcut.Arguments = $arguments
     $shortcut.WorkingDirectory = $repoRoot
     $shortcut.WindowStyle = 7
-    $shortcut.Description = 'Surveillance des directs Twitch Bloodborne en français'
+    $shortcut.Description = 'Surveillance des directs Twitch selon les filtres configurés'
     return $shortcut
 }
 
