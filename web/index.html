@@ -4,107 +4,104 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>Bloodborne FR Live</title>
+  <title>Directs · Twitch Live Alert</title>
+  <link rel="icon" href="/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <main class="page">
-    <header class="masthead">
-      <div class="emblem" aria-hidden="true"></div>
-      <div>
-        <h1>Bloodborne <span>FR Live</span></h1>
-        <p>Le guet des directs Bloodborne en français sur Twitch.</p>
-      </div>
-    </header>
-
-    <section class="watch" aria-labelledby="watch-heading">
-      <div class="watch-overview">
-        <div>
-          <h2 id="watch-heading">Surveillance</h2>
-          <p id="watch-detail">Connexion au service local…</p>
-        </div>
-        <span class="status-pill" id="monitor-state" data-tone="quiet" role="status">Connexion</span>
-      </div>
-      <p class="notice" id="watch-error" role="status" hidden></p>
-      <dl class="watch-facts">
-        <div><dt>Dernière vérification</dt><dd id="last-check">—</dd></div>
-        <div><dt>Prochaine vérification</dt><dd id="next-check">—</dd></div>
-        <div><dt>Notifications Windows</dt><dd id="notification-state">—</dd></div>
-      </dl>
-      <div class="watch-actions">
-        <div class="button-row">
-          <button id="check-now" class="button-primary" type="button" disabled>Vérifier maintenant</button>
-          <button id="toggle-monitor" type="button" disabled>Mettre en pause</button>
-          <button id="test-notification" class="button-quiet" type="button" disabled>Tester une notification</button>
-        </div>
+  <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4m8.4-8.4a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 2.3 7M3 5v6h6m3-5v6l4 2"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h3m5 0h8M4 17h8m5 0h3"/><rect x="7" y="4" width="5" height="6" rx="1.5"/><rect x="12" y="14" width="5" height="6" rx="1.5"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="9" r="5"/><path d="m12 12 8 8 2-2-2-2 1-1-3-3-2 2"/><path d="M6 8h.01"/></symbol>
+    <symbol id="i-screen" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 10a8 8 0 0 0-14-4L3 9m0-6v6h6m-5 5a8 8 0 0 0 14 4l3-3m0 6v-6h-6"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14m8-14v14" stroke-width="3"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m7 4 13 8-13 8z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 6-3 7-3 9h18c0-2-3-3-3-9ZM9 21h6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M13 4h7v7m0-7L10 14m-1-9H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24"><path d="M7 7h10c2 0 3 2 4 8 .7 4-1.3 5-3 3l-2-2H8l-2 2c-2 2-3.7 1-3-3 1-6 2-8 4-8Z"/><path d="M6 11h5m-2.5-2.5v5M15 11h.01M18 13h.01"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></symbol>
+    <symbol id="i-stream" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="15" rx="2"/><path d="m10 8 5 3.5-5 3.5z"/></symbol>
+    <symbol id="i-stack" viewBox="0 0 24 24"><path d="m12 3 10 5-10 5L2 8l10-5Zm-9 10 9 4.5 9-4.5M3 17l9 4.5 9-4.5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="m8 4 3 3m4-6 3 3m-9 7 7-7 4 4-7 7-4-4Zm1 3-4 4H3"/></symbol></svg>
+  <a class="skip" href="#main">Aller au contenu</a>
+  <aside class="sidebar">
+    <a class="brand" href="#directs"><img src="/mark.svg" alt="" width="36" height="36"><span>Twitch Live Alert</span></a>
+    <nav aria-label="Navigation principale">
+      <div class="nav-group"><p>Surveillance</p><a class="nav-link" href="#directs" data-nav="directs"><svg aria-hidden="true" class="icon"><use href="#i-radio"/></svg><span>Directs</span></a><a class="nav-link" href="#journal" data-nav="journal"><svg aria-hidden="true" class="icon"><use href="#i-history"/></svg><span>Journal</span></a></div>
+      <div class="nav-group"><p>Configuration</p><a class="nav-link" href="#reglages" data-nav="reglages"><svg aria-hidden="true" class="icon"><use href="#i-sliders"/></svg><span>Réglages</span></a><a class="nav-link" href="#connexion" data-nav="connexion"><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg><span>Connexion Twitch</span></a></div>
+    </nav>
+    <div class="sidebar-footer"><svg aria-hidden="true" class="icon"><use href="#i-screen"/></svg><span>Service local<small id="service-state" role="status">Connexion en cours</small></span></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div class="crumb"><svg aria-hidden="true" class="icon"><use href="#i-screen"/></svg><span>Console locale</span><svg aria-hidden="true" class="icon"><use href="#i-chevron"/></svg><strong id="crumb-page">Directs</strong></div><span id="version"></span></header>
+    <main id="main" tabindex="-1">
+      <noscript><p class="notice">Activez JavaScript pour accéder à la surveillance et aux réglages.</p></noscript>
+      <p class="notice" id="offline" role="status" hidden>Le service local ne répond pas. Relancez Twitch Live Alert si la fenêtre a été fermée. La connexion sera retentée automatiquement.</p>
+      <section data-page="directs" aria-labelledby="title-directs">
+        <header class="page-head"><div><h1 id="title-directs" tabindex="-1">Directs</h1><p>Les chaînes Twitch qui correspondent à vos filtres.</p></div><button id="check-now" type="button" class="primary" disabled><svg aria-hidden="true" class="icon"><use href="#i-refresh"/></svg><span>Vérifier maintenant</span></button></header>
+        <section class="monitor" aria-labelledby="monitor-state">
+          <div class="monitor-body"><div><div class="caption"><span class="led" id="monitor-led"></span>Détection Twitch</div>
+            <h2 id="monitor-state" aria-live="polite" aria-atomic="true">Connexion en cours</h2><p id="monitor-detail">Recherche du service local…</p>
+            <div class="monitor-actions"><a id="setup-link" class="button small primary" href="#connexion" hidden><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg>Configurer Twitch</a><button id="toggle-monitor" class="small" type="button" hidden><svg aria-hidden="true" class="icon"><use href="#i-pause"/></svg><span>Mettre en pause</span></button></div>
+          </div><div class="art-frame"><svg class="signal-art" viewBox="0 0 245 160" fill="none" aria-hidden="true">
+ <defs><pattern id="grid-dots" patternUnits="userSpaceOnUse" width="11" height="11"><circle cx="2" cy="2" r=".8" fill="#a59ec7" opacity=".5"/></pattern><linearGradient id="deck" x2="1" y2=".7" gradientUnits="objectBoundingBox"><stop stop-color="#4a405d"/><stop offset="1" stop-color="#272631"/></linearGradient></defs>
+ <rect width="245" height="160" fill="url(#grid-dots)"/>
+ <g stroke="#615974" stroke-linejoin="round"><path d="m44 103 81-40 81 40-81 41z" fill="#1b1a24"/><path d="m44 98 81-40 81 40-81 41z" fill="#2c2937"/><path d="m44 91 81-40 81 40-81 41z" fill="url(#deck)"/><path d="m61 91 64-31 64 31-64 32z" stroke-dasharray="3 4"/></g>
+ <g stroke="#cbb7ff" stroke-width="1.3" stroke-linejoin="round"><path d="m91 87 10-5 11 5-10 5z" fill="#e1d2ff"/><path d="m91 87 11 5v16l-11-5z" fill="#9f87db"/><path d="m102 92 10-5v16l-10 5z" fill="#5e4e85"/>
+ <path d="m115 43 10-5 11 5-10 5z" fill="#e5d8ff"/><path d="m115 43 11 5v49l-11-5z" fill="#b39be9"/><path d="m126 48 10-5v49l-10 5z" fill="#695692"/>
+ <path d="m139 63 10-5 11 5-10 5z" fill="#deceff"/><path d="m139 63 11 5v17l-11-5z" fill="#b19bdc"/><path d="m150 68 10-5v17l-10 5z" fill="#5a4d77"/></g>
+ <g stroke="#b49bdc" stroke-width="1.5" stroke-linecap="round"><path d="M111 30q14-10 29 0" opacity=".9"/><path d="M102 23q23-16 46 0" opacity=".6"/><path d="M93 16q32-22 64 0" opacity=".35"/></g></svg></div></div>
+          <dl class="monitor-facts"><div><dt><svg aria-hidden="true" class="icon"><use href="#i-clock"/></svg>Dernière vérification</dt><dd id="last-check">—</dd></div><div><dt><svg aria-hidden="true" class="icon"><use href="#i-refresh"/></svg>Prochaine vérification</dt><dd id="next-check">—</dd></div><div><dt><svg aria-hidden="true" class="icon"><use href="#i-bell"/></svg>Notifications Windows</dt><dd id="notifications-state">—</dd></div></dl>
+        </section>
         <p class="feedback" id="watch-feedback" role="status"></p>
-      </div>
-    </section>
-
-    <div class="workspace">
-      <section class="section" aria-labelledby="live-heading">
-        <header class="section-heading">
-          <h2 id="live-heading">Directs détectés</h2>
-          <span class="section-count" id="stream-count" hidden></span>
-        </header>
-        <p class="list-message" id="stream-message">Chargement des directs…</p>
-        <ul class="entries" id="stream-list"></ul>
+        <section class="panel" aria-labelledby="streams-title"><header class="panel-header"><h2 id="streams-title">Chaînes en direct <span class="count" id="stream-count" hidden></span></h2><a class="text-link" href="#reglages"><svg aria-hidden="true" class="icon"><use href="#i-sliders"/></svg>Modifier les filtres</a></header>
+          <div class="filters" id="filters" hidden><span><svg aria-hidden="true" class="icon"><use href="#i-game"/></svg><span id="category-tag"></span></span><span><svg aria-hidden="true" class="icon"><use href="#i-globe"/></svg><span id="language-tag"></span></span></div>
+          <div id="stream-message" class="empty"></div><ul id="stream-list" class="rows"></ul>
+          <footer class="pagination" id="more-streams" hidden><span id="stream-range"></span><button id="show-more" class="small" type="button">Afficher la suite</button></footer>
+        </section>
+        <section class="panel" aria-labelledby="recent-title"><header class="panel-header"><h2 id="recent-title">Dernières notifications</h2><a class="text-link" href="#journal">Voir le journal <svg aria-hidden="true" class="icon"><use href="#i-arrow"/></svg></a></header><div id="recent-message" class="compact-empty">Chargement des notifications…</div><ul id="recent-list" class="rows"></ul></section>
       </section>
-
-      <section class="section settings" aria-labelledby="settings-heading">
-        <header class="section-heading">
-          <h2 id="settings-heading">Réglages</h2>
-        </header>
-        <form id="settings-form">
-          <fieldset id="settings-fields" disabled>
-            <div class="interval-row">
-              <label for="poll-interval">Intervalle de vérification</label>
-              <div class="interval-input">
-                <input id="poll-interval" type="number" min="15" max="3600" step="1" inputmode="numeric" required
-                  aria-describedby="interval-unit interval-range">
-                <span id="interval-unit">secondes</span>
-              </div>
-              <p class="field-help" id="interval-range">De 15 à 3 600 secondes.</p>
-            </div>
-            <label class="check-row">
-              <input type="checkbox" id="notify-first">
-              <span class="check-mark" aria-hidden="true"></span>
-              <span>
-                <span>M’avertir des directs déjà en cours</span>
-                <small>Lors de la première vérification Twitch sur une installation neuve.</small>
-              </span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" id="start-windows">
-              <span class="check-mark" aria-hidden="true"></span>
-              <span>
-                <span>Lancer avec Windows</span>
-                <small>Ouvre la surveillance à l’ouverture de session.</small>
-              </span>
-            </label>
-          </fieldset>
-          <div class="settings-actions">
-            <button id="save-settings" class="button-primary" type="submit" disabled>Enregistrer</button>
-            <p class="feedback" id="settings-feedback" role="status"></p>
-          </div>
-        </form>
+      <section data-page="journal" aria-labelledby="title-journal" hidden>
+        <header class="page-head"><div><h1 id="title-journal" tabindex="-1">Journal</h1><p>Retrouvez les notifications de direct enregistrées sur ce PC.</p></div></header>
+        <section class="panel" aria-labelledby="history-title"><header class="panel-header"><h2 id="history-title">Historique des notifications</h2><span id="history-total" class="dim"></span></header>
+        <div class="search-row"><label class="search"><svg aria-hidden="true" class="icon"><use href="#i-search"/></svg><span class="sr-only">Rechercher dans le journal</span><input id="history-query" type="search" placeholder="Rechercher une chaîne ou un titre…" maxlength="200"></label><button id="clear-search" class="small" type="button" hidden>Effacer</button></div>
+        <p id="history-feedback" class="inline-feedback" role="status"></p><div id="history-message" class="empty"></div><ul id="history-list" class="rows"></ul><footer id="pagination" class="pagination" hidden><span id="history-range"></span><div><button id="previous" class="small" type="button">Précédent</button><button id="next" class="small" type="button">Suivant</button></div></footer></section>
       </section>
-
-      <section class="section history" aria-labelledby="history-heading">
-        <header class="section-heading">
-          <h2 id="history-heading">Notifications récentes</h2>
-        </header>
-        <p class="list-message" id="history-message">Chargement de l’historique…</p>
-        <ul class="entries" id="notification-list"></ul>
+      <section data-page="reglages" aria-labelledby="title-reglages" hidden>
+        <header class="page-head"><div><h1 id="title-reglages" tabindex="-1">Réglages</h1><p>Choisissez les directs à surveiller et la façon de recevoir les alertes.</p></div></header>
+        <form id="settings-form"><fieldset id="settings-fields" disabled>
+          <section class="panel form-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-filter"/></svg>Filtres de surveillance</h2></header><div class="form-grid">
+            <div class="field"><label for="category">Catégorie Twitch</label><input id="category" type="text" maxlength="200" placeholder="Ex. Bloodborne" required autocomplete="off" list="category-options" aria-describedby="category-help category-feedback"><datalist id="category-options"></datalist><small id="category-help">Saisissez le nom exact de la catégorie.</small><small id="category-feedback" role="status"></small></div>
+            <div class="field"><label for="language">Langue des directs</label><select id="language" aria-describedby="language-help"><option value="">Toutes les langues</option></select><small id="language-help">Langue indiquée par la chaîne sur Twitch.</small></div>
+          </div></section>
+          <section class="panel form-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-clock"/></svg>Fonctionnement</h2></header>
+          <div class="setting-row"><div><label for="poll-interval">Intervalle de vérification</label><small id="interval-help">De 15 à 3 600 secondes.</small></div><div class="number-input"><input id="poll-interval" type="number" min="15" max="3600" step="1" inputmode="numeric" required aria-describedby="interval-help interval-unit"><span id="interval-unit">secondes</span></div></div>
+          <label class="setting-row switch-row"><span>Avertir des directs déjà en cours<small>Inclure les chaînes en ligne lors du premier relevé de chaque nouveau filtre.</small></span><input id="notify-first" class="switch" type="checkbox"></label>
+          <label class="setting-row switch-row"><span>Lancer avec Windows<small>Démarrer la surveillance à l’ouverture de votre session.</small></span><input id="start-windows" class="switch" type="checkbox"></label></section>
+        </fieldset><div class="form-actions"><button id="save-settings" class="primary" type="submit" disabled><svg aria-hidden="true" class="icon"><use href="#i-check"/></svg>Enregistrer les réglages</button><p class="feedback" id="settings-feedback" role="status"></p></div></form>
+        <section class="panel test-panel"><div><h2><svg aria-hidden="true" class="icon"><use href="#i-bell"/></svg>Notification de test</h2><p>Vérifiez que Windows affiche les alertes sur ce PC.</p></div><button id="test-notification" type="button" disabled>Envoyer un test</button><p class="feedback" id="test-feedback" role="status"></p></section>
       </section>
-    </div>
-
-    <noscript><p class="notice">Activez JavaScript pour accéder à la surveillance et aux réglages.</p></noscript>
-    <footer>
-      <span>Bloodborne FR Live</span>
-      <span id="app-version"></span>
-    </footer>
-  </main>
+      <section data-page="connexion" aria-labelledby="title-connexion" hidden>
+        <header class="page-head"><div><h1 id="title-connexion" tabindex="-1">Connexion Twitch</h1><p>Autorisez la surveillance à interroger le catalogue des directs Twitch.</p></div></header>
+        <section class="panel connect-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg>Identifiants d’application</h2><span id="credentials-state" class="status-tag">En attente</span></header>
+          <form id="credentials-form" autocomplete="off"><fieldset id="credentials-fields" disabled>
+          <div class="form-intro"><p>Copiez les identifiants d’une application depuis la console développeur Twitch.</p><a class="text-link" href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">Ouvrir la console Twitch <svg aria-hidden="true" class="icon"><use href="#i-external"/></svg></a></div>
+          <div class="field"><label for="client-id">Identifiant client <span lang="en">Client ID</span></label><input id="client-id" required type="text" spellcheck="false" autocomplete="off" autocapitalize="none"></div>
+          <div class="field"><label for="client-secret">Secret client <span lang="en">Client Secret</span></label><input id="client-secret" required type="password" spellcheck="false" autocomplete="off" aria-describedby="secret-help"><small id="secret-help"><svg aria-hidden="true" class="icon"><use href="#i-lock"/></svg>Le secret reste masqué. Les champs sont vidés après l’enregistrement.</small></div>
+          </fieldset><div class="form-actions"><button id="save-credentials" type="submit" class="primary" disabled><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg>Enregistrer les identifiants</button><p class="feedback" id="credential-feedback" role="status"></p></div></form>
+        </section><a class="back-link text-link" href="#directs">Retour aux directs <svg aria-hidden="true" class="icon"><use href="#i-arrow"/></svg></a>
+      </section>
+    </main>
+  </div>
 </body>
 </html>

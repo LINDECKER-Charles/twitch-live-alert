@@ -1,16 +1,16 @@
 # Ergonomie
 
-La page locale permet de lire l’état, de consulter les directs, de régler la surveillance et de revoir les notifications récentes.
+| Tâche | Destination et contrôle |
+| --- | --- |
+| Détecter de nouveaux directs | **Directs** indique l’état Twitch, la fraîcheur du relevé, les filtres et les chaînes. Vérifier maintenant demande un relevé ponctuel. La pause et la reprise s’appliquent immédiatement. |
+| Retrouver une alerte | **Journal** recherche le nom de chaîne ou le titre dans tout l’historique local. Les pages contiennent 50 résultats au plus. Effacer retire le terme de recherche. |
+| Définir le périmètre | **Réglages** associe une catégorie Twitch à une langue ou à toutes les langues. Les suggestions aident à retrouver le nom exact de la catégorie quand Twitch est configuré. |
+| Choisir le comportement | Le champ numérique règle l’intervalle de 15 à 3 600 secondes. Deux cases indépendantes règlent le premier relevé de chaque nouveau filtre et le démarrage Windows. Enregistrer applique le formulaire. Envoyer un test sollicite Windows et restitue le résultat du service. |
+| Connecter une application | **Connexion Twitch** ouvre la console développeur et reçoit les deux identifiants. Les champs sont vidés après succès et en quittant cette destination. Une saisie refusée peut être corrigée sur place. |
+| Ouvrir une diffusion | Le nom de chaîne renvoie vers son adresse Twitch. Une icône signale la sortie de l’application. |
 
-| Besoin | Choix |
-|---|---|
-| Identifier l’état de la surveillance | Libellé de statut en haut de page. La couleur accompagne le texte. |
-| Agir sur la surveillance | Boutons de pause, reprise et vérification ponctuelle. |
-| Paramétrer un délai | Champ numérique avec unité, plage et validation native. |
-| Modifier les options indépendantes | Cases à cocher avec libellés cliquables. |
-| Ouvrir un direct | Lien Twitch sur le nom de la chaîne. |
-| Signaler un résultat | Retour près de la commande, annoncé sans déplacement du focus. |
+Le libellé **Service local** indique si la console reçoit une réponse du processus sur le PC. **Surveillance active**, **Surveillance en pause** et **Surveillance dégradée** décrivent la détection des directs. **Notification** désigne une alerte Windows enregistrée dans le journal. La réception d’une commande de vérification et le résultat de ce relevé sont affichés séparément.
 
-« Surveillance » désigne le service, « vérification » une interrogation de Twitch et « direct » une diffusion. À 820 px les sections basculent en colonne. À 530 px les commandes s’empilent. L’ordre de tabulation suit le document.
+Les actualisations préservent les brouillons et le lien de chaîne utilisé au clavier. Les actions affichent une confirmation ou une erreur au voisinage de la commande. Lors d’une interruption locale, les gestes indisponibles se désactivent et le dernier relevé reste daté. Le changement de page met le focus sur son titre. Le lien d’évitement conduit au contenu et le retour du navigateur retrouve la destination précédente.
 
-Voir la [fiche Surveillance](fiches/surveillance.md) et la [planche](PLANCHE.md).
+À 760 px ou moins, la navigation devient une barre horizontale. À 540 px ou moins, les horaires et les champs passent en colonne. La destination Connexion Twitch reste nommée sur les petits écrans. [Fiche de parcours](fiches/surveillance.md) · [Vérification des écrans](PLANCHE.md)

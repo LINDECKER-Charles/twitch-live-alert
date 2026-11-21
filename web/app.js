@@ -1,333 +1,331 @@
-const byId = (id) => document.getElementById(id);
-const ui = {
-  monitorState: byId("monitor-state"),
-  watchDetail: byId("watch-detail"),
-  watchError: byId("watch-error"),
-  lastCheck: byId("last-check"),
-  nextCheck: byId("next-check"),
-  notificationState: byId("notification-state"),
-  checkNow: byId("check-now"),
-  toggleMonitor: byId("toggle-monitor"),
-  testNotification: byId("test-notification"),
-  watchFeedback: byId("watch-feedback"),
-  streamCount: byId("stream-count"),
-  streamMessage: byId("stream-message"),
-  streamList: byId("stream-list"),
-  historyMessage: byId("history-message"),
-  notificationList: byId("notification-list"),
-  form: byId("settings-form"),
-  fields: byId("settings-fields"),
-  interval: byId("poll-interval"),
-  notifyFirst: byId("notify-first"),
-  startWindows: byId("start-windows"),
-  save: byId("save-settings"),
-  settingsFeedback: byId("settings-feedback"),
-  version: byId("app-version"),
-};
+import { createJournal, dateLabel, emptyState, renderRows, text } from "./lists.js";
 
-const dateFormat = new Intl.DateTimeFormat("fr-FR", {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-const numberFormat = new Intl.NumberFormat("fr-FR");
-const listSnapshots = new WeakMap();
-const connectionError = "Le service local ne répond pas. Si la surveillance est fermée, relancez-la depuis le raccourci Bureau.";
-
+const id = name => document.getElementById(name);
+const labels = { directs: "Directs", journal: "Journal", reglages: "Réglages", connexion: "Connexion Twitch" };
+const disconnection = "Le service local ne répond pas. Relancez Twitch Live Alert, puis réessayez.";
+const languages = new Intl.DisplayNames(["fr"], { type: "language" });
+// ISO 639-1 codes. Twitch also accepts the language "other".
+const codes = ("aa ab ae af ak am an ar as av ay az ba be bg bh bi bm bn bo br bs ca ce ch co cr cs cu cv cy da de dv dz ee el en eo es et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi ho hr ht hu hy hz ia id ie ig ii ik io is it iu ja jv ka kg ki kj kk kl km kn ko kr ks ku kv kw ky la lb lg li ln lo lt lu lv mg mh mi mk ml mn mr ms mt my na nb nd ne ng nl nn no nr nv ny oc oj om or os pa pi pl ps pt qu rm rn ro ru rw sa sc sd se sg si sk sl sm sn so sq sr ss st su sv sw ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve vi vo wa wo xh yi yo za zh zu other").split(" ");
 let status = null;
 let connected = false;
 let refreshing = false;
-let pending = null;
+let pending = "";
 let revision = 0;
+let page = "";
+const streamPageSize = 50;
+let visibleStreams = streamPageSize;
+let categoryTimer = null;
+let categoryTicket = 0;
+let requestingStatus = false;
+const journal = createJournal(request, id);
 
-function setText(element, text) {
-  if (element.textContent !== text) element.textContent = text;
+function langName(code) {
+  if (!code) return "Toutes les langues";
+  if (code === "other") return "Autre langue";
+  try {
+    const name = languages.of(code) || code;
+    return name.charAt(0).toLocaleUpperCase("fr") + name.slice(1);
+  } catch { return code; }
 }
 
-function feedback(element, text, tone = "neutral") {
+function initLanguages() {
+  const options = codes.map(code => new Option(langName(code), code))
+    .sort((a, b) => a.text.localeCompare(b.text, "fr"));
+  id("language").append(...options);
+}
+
+function say(element, message, tone = "") {
   element.dataset.tone = tone;
-  setText(element, text);
+  text(element, message);
 }
 
-function setMessage(element, text) {
-  setText(element, text);
-  element.hidden = !text;
-}
-
-function formatDate(value) {
-  if (value == null) return null;
-  const date = new Date(typeof value === "number" ? value * 1000 : value);
-  return Number.isNaN(date.getTime()) ? null : dateFormat.format(date);
-}
-
-function settingsFromForm() {
+function currentSettings() {
   return {
-    poll_interval_seconds: ui.interval.valueAsNumber,
-    notify_existing_on_first_run: ui.notifyFirst.checked,
-    start_with_windows: ui.startWindows.checked,
+    category: id("category").value.trim(),
+    language: id("language").value,
+    poll_interval_seconds: id("poll-interval").valueAsNumber,
+    notify_existing_on_first_run: id("notify-first").checked,
+    start_with_windows: id("start-windows").checked,
   };
 }
 
-function formChanged() {
-  if (!status) return false;
-  return Object.entries(settingsFromForm()).some(([key, value]) => value !== status[key]);
+function changed(values = currentSettings(), stored = status) {
+  return Boolean(stored) && Object.entries(values).some(([key, value]) => stored[key] !== value);
 }
 
-function fillForm(data) {
-  ui.interval.value = data.poll_interval_seconds;
-  ui.notifyFirst.checked = data.notify_existing_on_first_run;
-  ui.startWindows.checked = data.start_with_windows;
-}
-
-function setButton(button, available, busy, label) {
-  button.disabled = !available;
-  button.setAttribute("aria-disabled", String(busy || !available));
-  setText(button, label);
-}
-
-function renderControls() {
-  const canUse = connected && Boolean(status);
-  const busy = pending !== null;
-  setButton(ui.checkNow, Boolean(canUse && status.running && status.configured), busy,
-    pending === "check" ? "Demande en cours…" : "Vérifier maintenant");
-  setButton(ui.toggleMonitor, canUse, busy,
-    status?.running === false ? "Reprendre" : "Mettre en pause");
-  setButton(ui.testNotification, Boolean(canUse && status.notifications_available), busy,
-    pending === "test" ? "Envoi en cours…" : "Tester une notification");
-  ui.fields.disabled = !canUse;
-  setButton(ui.save, canUse, busy || !formChanged(),
-    pending === "settings" ? "Enregistrement…" : "Enregistrer");
-}
-
-function twitchUrl(value) {
-  return typeof value === "string"
-    && /^https:\/\/www\.twitch\.tv\/[a-z0-9_]+$/i.test(value) ? value : null;
-}
-
-function createEntry(data, meta) {
-  const entry = document.createElement("li");
-  entry.className = "entry";
-  const copy = document.createElement("div");
-  const name = document.createElement("h3");
-  name.className = "entry-name";
-  const href = twitchUrl(data.url);
-
-  if (href) {
-    const link = document.createElement("a");
-    link.href = href;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = data.user_name;
-    name.append(link);
-  } else {
-    name.textContent = data.user_name;
+function fillSettings(data) {
+  id("category").value = data.category;
+  if (![...id("language").options].some(option => option.value === data.language)) {
+    id("language").add(new Option(langName(data.language), data.language));
   }
-
-  copy.append(name);
-  if (data.title) {
-    const title = document.createElement("p");
-    title.className = "entry-title";
-    title.textContent = data.title;
-    copy.append(title);
-  }
-  entry.append(copy);
-
-  if (meta) {
-    const detail = document.createElement("p");
-    detail.className = "entry-meta";
-    detail.textContent = meta;
-    entry.append(detail);
-  }
-  return entry;
+  id("language").value = data.language;
+  id("poll-interval").value = data.poll_interval_seconds;
+  id("notify-first").checked = data.notify_existing_on_first_run;
+  id("start-windows").checked = data.start_with_windows;
 }
 
-function updateList(list, items, describe) {
-  const snapshot = JSON.stringify(items);
-  if (listSnapshots.get(list) === snapshot) return;
-  if (list.contains(document.activeElement)) return;
-  list.replaceChildren(...items.map((item) => createEntry(item, describe(item))));
-  listSnapshots.set(list, snapshot);
+function controls() {
+  const usable = connected && Boolean(status);
+  const busy = Boolean(pending);
+  id("check-now").hidden = Boolean(usable && (!status.configured || !status.running));
+  id("check-now").disabled = !usable || !status?.configured || !status?.running || busy;
+  id("check-now").querySelector("span").textContent = pending === "check" ? "Vérification…" : "Vérifier maintenant";
+  const toggle = id("toggle-monitor");
+  toggle.hidden = !status?.configured;
+  toggle.disabled = !usable || busy;
+  toggle.classList.toggle("primary", status?.running === false);
+  toggle.querySelector("span").textContent = status?.running === false ? "Reprendre" : "Mettre en pause";
+  toggle.querySelector("use").setAttribute("href", status?.running === false ? "#i-play" : "#i-pause");
+  id("setup-link").hidden = !usable || status.configured;
+  id("test-notification").disabled = !usable || busy;
+  id("settings-fields").disabled = !usable || pending === "settings";
+  id("save-settings").disabled = !usable || busy || !changed();
+  id("credentials-fields").disabled = !usable || pending === "credentials";
+  id("save-credentials").disabled = !usable || busy || !id("client-id").value.trim() || !id("client-secret").value;
 }
 
-function renderLists() {
-  if (!status) {
-    if (!connected) {
-      setMessage(ui.streamMessage, "Directs indisponibles tant que le service local est inaccessible.");
-      setMessage(ui.historyMessage, "Historique indisponible tant que le service local est inaccessible.");
-    }
-    return;
-  }
+function describeMonitor() {
+  if (!connected) return ["Service hors connexion", "bad", "La surveillance ne peut pas être consultée sur ce PC."];
+  if (!status.configured) return ["Twitch à configurer", "warn", "Connectez votre application Twitch pour détecter les premiers directs."];
+  if (status.last_error) return ["Surveillance dégradée", "warn", status.last_error];
+  if (!status.running) return ["Surveillance en pause", "", "Reprenez la surveillance pour vérifier les directs automatiquement."];
+  return ["Surveillance active", "good", "Les directs sont vérifiés toutes les " + status.poll_interval_seconds + " secondes."];
+}
 
-  const streams = status.live_streams;
-  let streamMessage = "";
+function renderStreams() {
+  const streams = status?.live_streams || [];
+  const hasResult = Boolean(status?.last_checked_at) || streams.length > 0;
+  id("stream-count").hidden = !hasResult;
+  text(id("stream-count"), String(streams.length));
+  id("filters").hidden = !status;
+  if (status) {
+    text(id("category-tag"), status.category);
+    text(id("language-tag"), langName(status.language));
+  }
+  let heading = "", detail = "", symbol = "radio";
   if (!connected) {
-    streamMessage = "Dernier relevé disponible. La connexion au service local est interrompue.";
+    heading = streams.length ? "Dernier relevé disponible" : "Directs indisponibles";
+    detail = "La connexion au service local est interrompue.";
   } else if (!status.configured) {
-    streamMessage = "Configurez Twitch pour détecter les directs.";
-  } else if (!status.running) {
-    streamMessage = streams.length
-      ? "Dernier relevé avant la mise en pause."
-      : "Reprenez la surveillance pour rechercher les directs.";
+    symbol = "plug"; heading = "En attente de connexion Twitch";
+    detail = "Les chaînes détectées apparaîtront ici après la configuration.";
   } else if (status.last_error) {
-    streamMessage = streams.length ? "Dernier relevé disponible." : "La dernière vérification a échoué.";
-  } else if (!status.last_checked_at) {
-    streamMessage = "En attente de la première vérification Twitch.";
+    heading = streams.length ? "Dernier relevé disponible" : "Vérification indisponible";
+    detail = "La dernière vérification Twitch a échoué.";
+  } else if (!status.running) {
+    heading = streams.length ? "Dernier relevé avant la pause" : "Recherche en pause";
+    detail = streams.length ? "" : "Reprenez la surveillance pour rechercher des chaînes.";
+  } else if (!hasResult) {
+    heading = "En attente du premier relevé";
+    detail = "La liste se remplira après la première vérification Twitch.";
   } else if (streams.length === 0) {
-    streamMessage = "Aucun direct Bloodborne en français détecté.";
+    heading = "Aucune chaîne en direct";
+    detail = "Aucun direct ne correspond actuellement aux filtres de surveillance.";
   }
-
-  setMessage(ui.streamMessage, streamMessage);
-  ui.streamCount.hidden = !status.last_checked_at && streams.length === 0;
-  setText(ui.streamCount, numberFormat.format(streams.length)
-    + (streams.length === 1 ? " direct" : " directs"));
-  updateList(ui.streamList, streams, (stream) =>
-    numberFormat.format(stream.viewer_count) + (stream.viewer_count === 1 ? " spectateur" : " spectateurs"));
-
-  const notifications = status.notifications;
-  setMessage(ui.historyMessage, notifications.length ? "" : "Aucune notification de direct enregistrée.");
-  updateList(ui.notificationList, notifications, (notification) => formatDate(notification.recorded_at));
-}
-
-function describeStatus() {
-  if (!connected) return ["Hors connexion", "error", connectionError];
-  if (!status.configured) {
-    return ["Twitch à configurer", "attention",
-      "Ajoutez les identifiants Twitch via le coffre, puis relancez la surveillance."];
-  }
-  if (!status.running) {
-    return ["En pause", "quiet", "La recherche automatique des directs est suspendue."];
-  }
-  if (status.last_error) {
-    return ["À vérifier", "attention", "La surveillance continue. La dernière vérification a rencontré un problème."];
-  }
-  return ["Active", "live", "Les nouveaux directs détectés déclenchent une notification Windows."];
+  const message = id("stream-message");
+  emptyState(message, symbol, heading, detail);
+  message.classList.toggle("has-rows", streams.length > 0);
+  renderRows(id("stream-list"), streams.slice(0, visibleStreams));
+  id("more-streams").hidden = streams.length <= visibleStreams;
+  text(id("stream-range"), Math.min(streams.length, visibleStreams) + " chaînes affichées sur " + streams.length);
+  const recent = status?.notifications?.slice(0, 3) || [];
+  id("recent-message").hidden = recent.length > 0;
+  text(id("recent-message"), status ? "Aucune notification enregistrée pour le moment." : "Notifications indisponibles.");
+  renderRows(id("recent-list"), recent, true);
 }
 
 function render() {
-  const [label, tone, detail] = describeStatus();
-  ui.monitorState.dataset.tone = tone;
-  setText(ui.monitorState, label);
-  setText(ui.watchDetail, detail);
-  setMessage(ui.watchError, connected ? status?.last_error || "" : "");
-  setText(ui.lastCheck, formatDate(status?.last_checked_at) || "—");
-  setText(ui.nextCheck, connected && status?.running && status?.configured
-    ? formatDate(status.next_check_at) || "En attente"
-    : "—");
-  setText(ui.notificationState, status
-    ? (status.notifications_available ? "Disponibles" : "Indisponibles")
-    : "—");
-  setText(ui.version, status?.app_version ? "Version " + status.app_version : "");
-  renderLists();
-  renderControls();
+  const [label, tone, detail] = describeMonitor();
+  id("monitor-led").dataset.tone = tone;
+  text(id("monitor-state"), label);
+  text(id("monitor-detail"), detail);
+  id("offline").hidden = connected;
+  say(id("service-state"), connected ? "Connecté" : "Hors connexion", connected ? "good" : "bad");
+  text(id("version"), status?.app_version ? "v" + status.app_version : "");
+  text(id("last-check"), dateLabel(status?.last_checked_at, true));
+  const next = status?.next_check_at;
+  const scheduled = connected && status?.configured && status.running;
+  const nextLabel = next ? (next * 1000 <= Date.now() ? "Imminente" : dateLabel(next, true)) : "En attente";
+  text(id("next-check"), scheduled ? nextLabel : "—");
+  text(id("notifications-state"), status ? (status.notifications_available ? "Disponibles" : "Indisponibles") : "—");
+  const configured = status?.configured;
+  say(id("credentials-state"), !connected ? "État inconnu" : configured ? "Configurée" : "À configurer",
+    !connected ? "" : configured ? "good" : "warn");
+  renderStreams();
+  controls();
 }
 
 async function request(path, body) {
   const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), body === undefined ? 14000 : 30000);
+  const options = { cache: "no-store", signal: controller.signal, credentials: "same-origin", redirect: "error" };
+  if (body !== undefined) {
+    options.method = "POST";
+    options.headers = { "Content-Type": "application/json", "X-Twitch-Live-Alert": "local" };
+    options.body = JSON.stringify(body);
+  }
   try {
-    const options = { cache: "no-store", signal: controller.signal };
-    if (body !== undefined) {
-      Object.assign(options, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Bloodborne-Request": "local",
-        },
-        body: JSON.stringify(body),
-      });
-    }
     const response = await fetch("/api/" + path, options);
+    if (response.status === 202 || response.status === 204) return null;
     const result = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new Error(result?.message || "Le service local a refusé la demande.");
+      let message = typeof result?.message === "string" ? result.message : "Le service local a refusé la demande.";
+      if (path === "credentials" && Object.values(body).some(value => value && message.includes(value))) {
+        message = "Impossible d’enregistrer les identifiants. Vérifiez la saisie, puis réessayez.";
+      }
+      throw new Error(message);
     }
     return result;
-  } finally {
-    clearTimeout(deadline);
-  }
+  } finally { clearTimeout(timeout); }
 }
 
-function applyStatus(data, syncForm = !formChanged()) {
-  if (data?.app_id !== "bloodborne-fr-live") throw new Error("Réponse inattendue du service local.");
+function applyStatus(data, sync = !changed()) {
+  if (data?.app_id !== "twitch-live-alert" || !Array.isArray(data.live_streams)) throw Error("Réponse inattendue du service local.");
+  if (data.category !== status?.category || data.language !== status?.language) visibleStreams = streamPageSize;
   status = data;
   connected = true;
-  if (syncForm) fillForm(status);
+  if (sync) fillSettings(data);
   render();
 }
 
 async function refresh() {
-  if (refreshing || pending) return;
+  if (pending) return;
+  if (refreshing) { requestingStatus = true; return; }
   refreshing = true;
-  const requestRevision = revision;
+  const ticket = revision;
   try {
     const data = await request("status");
-    if (revision === requestRevision) applyStatus(data);
+    if (ticket === revision) applyStatus(data);
   } catch {
-    if (revision === requestRevision) {
-      connected = false;
-      render();
-    }
+    if (ticket === revision) { connected = false; render(); }
   } finally {
     refreshing = false;
+    if (requestingStatus) { requestingStatus = false; void refresh(); }
   }
 }
 
-async function runAction(action, message, task) {
+async function act(key, target, waiting, task) {
   if (pending || !connected) return;
-  const target = action === "settings" ? ui.settingsFeedback : ui.watchFeedback;
-  pending = action;
-  revision += 1;
-  feedback(target, message);
-  renderControls();
+  const previousFocus = document.activeElement;
+  const previousPage = page;
+  pending = key;
+  revision++;
+  controls();
+  say(target, waiting);
   try {
-    feedback(target, await task(), "success");
+    say(target, await task(), "good");
   } catch (error) {
-    const unavailable = error instanceof TypeError || error.name === "AbortError";
-    feedback(target, unavailable ? connectionError : error.message, "error");
+    const network = error instanceof TypeError || error.name === "AbortError";
+    say(target, network ? disconnection : error.message, "bad");
   } finally {
-    pending = null;
-    renderControls();
+    pending = "";
+    controls();
+    if (previousPage === page && document.activeElement === document.body && previousFocus !== document.body) {
+      if (previousFocus.matches(":enabled") && previousFocus.offsetParent) previousFocus.focus({ preventScroll: true });
+      else { target.tabIndex = -1; target.focus({ preventScroll: true }); }
+    }
     void refresh();
   }
 }
 
-ui.form.addEventListener("input", () => {
-  if (pending !== "settings") feedback(ui.settingsFeedback, "");
-  renderControls();
+function route(focus = true) {
+  const hash = location.hash.slice(1);
+  const next = Object.hasOwn(labels, hash) ? hash : "directs";
+  if (page === next) return;
+  if (page === "connexion") id("credentials-form").reset();
+  page = next;
+  for (const section of document.querySelectorAll("[data-page]")) section.hidden = section.dataset.page !== page;
+  for (const link of document.querySelectorAll("[data-nav]")) {
+    if (link.dataset.nav === page) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+  text(id("crumb-page"), labels[page]);
+  document.title = labels[page] + " · Twitch Live Alert";
+  if (focus) {
+    id("title-" + page).focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }
+  controls();
+  if (page === "journal") void journal.load();
+}
+
+async function suggestCategories(query, ticket) {
+  try {
+    const data = await request("categories?" + new URLSearchParams({ q: query }));
+    if (ticket !== categoryTicket) return;
+    const options = (data?.items || []).map(item => new Option(item.name, item.name));
+    id("category-options").replaceChildren(...options);
+    say(id("category-feedback"), options.length ? "" : "Aucune suggestion. Vous pouvez saisir le nom exact.");
+  } catch {
+    if (ticket === categoryTicket) say(id("category-feedback"), "Suggestions indisponibles. Vous pouvez saisir le nom exact.", "warn");
+  }
+}
+
+id("category").addEventListener("input", () => {
+  const value = id("category").value.trim();
+  const ticket = ++categoryTicket;
+  clearTimeout(categoryTimer);
+  id("category-options").replaceChildren();
+  say(id("category-feedback"), "");
+  if (value && status?.configured && connected) categoryTimer = setTimeout(() => void suggestCategories(value, ticket), 280);
 });
 
-ui.form.addEventListener("submit", (event) => {
+id("settings-form").addEventListener("input", () => { say(id("settings-feedback"), ""); controls(); });
+id("settings-form").addEventListener("submit", event => {
   event.preventDefault();
-  if (!formChanged()) return;
-  const submitted = settingsFromForm();
-  void runAction("settings", "Enregistrement des réglages…", async () => {
-    const data = await request("settings", submitted);
-    const editedDuringSave = Object.entries(settingsFromForm())
-      .some(([key, value]) => submitted[key] !== value);
-    applyStatus(data, !editedDuringSave);
-    return editedDuringSave ? "Réglages enregistrés. Des modifications restent à enregistrer." : "Réglages enregistrés.";
+  if (!changed()) return;
+  const values = currentSettings();
+  if (!values.category) {
+    say(id("settings-feedback"), "Saisissez le nom d’une catégorie Twitch.", "bad"); id("category").focus(); return;
+  }
+  void act("settings", id("settings-feedback"), "Enregistrement en cours…", async () => {
+    applyStatus(await request("settings", values), true);
+    return "Réglages enregistrés.";
   });
 });
-
-ui.checkNow.addEventListener("click", () => {
-  void runAction("check", "Demande de vérification en cours…", async () => {
-    await request("check-now", {});
-    return "Vérification demandée.";
+id("credentials-form").addEventListener("input", () => { say(id("credential-feedback"), ""); controls(); });
+id("credentials-form").addEventListener("submit", event => {
+  event.preventDefault();
+  const clientId = id("client-id").value.trim();
+  const secret = id("client-secret").value;
+  if (!clientId || !secret) return;
+  void act("credentials", id("credential-feedback"), "Enregistrement en cours…", async () => {
+    applyStatus(await request("credentials", { client_id: clientId, client_secret: secret }));
+    id("credentials-form").reset();
+    return "Identifiants Twitch enregistrés.";
   });
 });
-
-ui.toggleMonitor.addEventListener("click", () => {
-  void runAction("monitoring", "Mise à jour de la surveillance…", async () => {
-    applyStatus(await request("monitoring", { enabled: !status.running }));
-    return status.running ? "Surveillance reprise." : "Surveillance en pause.";
-  });
+id("show-more").addEventListener("click", event => {
+  const firstNew = visibleStreams;
+  visibleStreams += streamPageSize;
+  renderStreams();
+  if (event.detail === 0 || id("more-streams").hidden) {
+    id("stream-list").children[firstNew]?.querySelector("a")?.focus();
+  }
 });
+id("check-now").addEventListener("click", () => void act("check", id("watch-feedback"), "Demande de vérification…", async () => {
+  await request("check-now", {});
+  return "Vérification demandée.";
+}));
+id("toggle-monitor").addEventListener("click", () => void act("monitoring", id("watch-feedback"), "Mise à jour de la surveillance…", async () => {
+  applyStatus(await request("monitoring", { enabled: !status.running }));
+  return status.running ? "Surveillance reprise." : "Surveillance mise en pause.";
+}));
+id("test-notification").addEventListener("click", () => void act("test", id("test-feedback"), "Envoi à Windows…", async () => {
+  const data = await request("test-notification", {});
+  return data?.message || "Notification de test transmise à Windows.";
+}));
 
-ui.testNotification.addEventListener("click", () => {
-  void runAction("test", "Envoi de la notification de test…", async () => {
-    const result = await request("test-notification", {});
-    return result?.message || "Notification de test transmise à Windows.";
-  });
-});
-
+document.querySelector(".skip").addEventListener("click", event => { event.preventDefault(); id("main").focus(); });
+window.addEventListener("hashchange", () => route());
+window.addEventListener("pagehide", () => id("credentials-form").reset());
+initLanguages();
+emptyState(id("stream-message"), "radio", "Chargement des directs…");
+route(false);
 void refresh();
-setInterval(refresh, 5000);
+setInterval(() => {
+  if (document.hidden) return;
+  void refresh();
+  if (page === "journal") void journal.load();
+}, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { void refresh(); if (page === "journal") void journal.load(); } });
