@@ -13,10 +13,10 @@ La version 0.1 conservait les réglages et le journal dans le dossier `data` du 
 
 ## Reprendre la connexion Twitch
 
-Sur une installation neuve, ouvrez **Connexion Twitch** pour saisir votre paire d’identifiants. Si vous avez conservé la configuration de la version 0.1, vous pouvez également l’importer depuis une console ouverte dans **l’ancien dépôt**. Indiquez le chemin de l’exécutable du service installé.
+Sur une installation neuve, ouvrez **Connexion Twitch** pour saisir votre paire d’identifiants. Si vous avez conservé la configuration de la version 0.1, vous pouvez également l’importer depuis une console ouverte dans **l’ancien dépôt**. Pour une installation à l’emplacement proposé par défaut, utilisez la commande suivante.
 
 ```powershell
-& 'C:\chemin\vers\twitch-live-alert.exe' --import-credentials "$env:LOCALAPPDATA\TwitchLiveAlert"
+& "$env:LOCALAPPDATA\Twitch Live Alert\twitch-live-alert.exe" --import-credentials "$env:LOCALAPPDATA\TwitchLiveAlert"
 ```
 
 Le service lit les identifiants depuis l’environnement ou le fichier `.env` du dossier courant, les vérifie auprès de Twitch, puis les enregistre pour l’utilisateur Windows dans le profil cible. Conservez le fichier de développement dans son emplacement d’origine. Pour ce dépôt, la commande `coffre deployer alerte-bloodborne-frlive` sous Git Bash permet de le rétablir depuis le coffre chiffré.

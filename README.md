@@ -2,6 +2,10 @@
 
 Twitch Live Alert vous prévient sous Windows quand une chaîne passe en direct dans la catégorie et la langue que vous suivez. L’application affiche les directs en cours, ouvre la chaîne sur Twitch et conserve un journal consultable après redémarrage.
 
+![Console des directs avec le filtre Bloodborne en français et trois chaînes de démonstration](docs/design/apercu-directs.png)
+
+*Aperçu avec des données de démonstration.*
+
 ## Installer et commencer
 
 1. Téléchargez l’installateur Windows x64 fourni avec la version. Sur GitHub, ouvrez une exécution **CI** réussie sur `main`, puis téléchargez et décompressez l’artefact de l’installateur dans **Artifacts**. L’accès au dépôt est nécessaire. [Ouvrir la CI de main](https://github.com/LINDECKER-Charles/twitch-live-alert/actions/workflows/ci.yml?query=branch%3Amain)
@@ -10,7 +14,7 @@ Twitch Live Alert vous prévient sous Windows quand une chaîne passe en direct 
 4. Dans **Réglages**, choisissez une catégorie et une langue. Le premier filtre proposé est **Bloodborne · Français**. Choisissez **Toutes les langues** pour suivre toute la catégorie.
 5. Ouvrez **Directs** pour vérifier le dernier relevé. La commande de test des notifications permet aussi de vérifier que Windows accepte les alertes.
 
-Le tableau de bord fonctionne également dans un navigateur, sur le même PC, pendant que l’application tourne. Les deux fenêtres partagent la surveillance, les réglages et le journal. [Ouvrir le tableau de bord local](http://127.0.0.1:37219/)
+Le tableau de bord fonctionne également dans un navigateur, sur le même PC. Dans la zone de notification Windows, le menu de Twitch Live Alert propose **Ouvrir dans le navigateur**. Fermer la fenêtre laisse la surveillance active. **Quitter** arrête le bureau et le service qu’il a lancé. [Ouvrir le tableau de bord local](http://127.0.0.1:37219/)
 
 ## Obtenir les identifiants Twitch
 
@@ -31,6 +35,8 @@ Si vous renouvelez le secret dans la console Twitch, remplacez-le également dan
 | Connexion Twitch | Configurer ou remplacer les identifiants utilisés par le service. |
 
 Le service vérifie Twitch toutes les 60 secondes par défaut. Il lit les pages successives de la catégorie. Une diffusion très courte peut passer entre deux relevés et le classement des chaînes peut changer pendant la pagination. La veille du PC et la fermeture de session interrompent la surveillance. En cas de limitation de débit, la prochaine tentative est différée. [Liste des directs](https://dev.twitch.tv/docs/api/reference/streams#get-streams) · [Pagination et limites de débit](https://dev.twitch.tv/docs/api/guide/)
+
+Sur un profil neuf, le premier relevé complet d’un filtre enregistre silencieusement les chaînes déjà en ligne. Les nouvelles diffusions déclenchent ensuite une alerte. Une option dans **Réglages** permet d’alerter dès le premier relevé. Pour une catégorie très suivie, elle peut déclencher de nombreuses notifications.
 
 Les alertes traitées restent dans SQLite. Si Windows refuse une notification, le service peut la réessayer au prochain relevé. Une interruption entre l’acceptation de l’alerte par Windows et l’écriture dans SQLite peut produire un doublon. Le journal retrace les alertes transmises au système. L’affichage des bannières dépend aussi de **Paramètres Windows → Système → Notifications**, du mode **Ne pas déranger** et des préférences de l’utilisateur.
 
@@ -54,7 +60,20 @@ Depuis la racine du dépôt avec Rust installé, utilisez `cargo build --locked 
 | `--dry-run` | Lit les directs sur Twitch sans envoyer de notification ni inscrire de livraison. |
 | `--once` | Effectue un relevé avec notification et enregistrement, puis quitte. |
 | `--no-web` | Surveille dans le terminal sans serveur HTTP. |
+| `--port 37220` | Ouvre le tableau de bord autonome sur un autre port local. Pour exécuter deux services, utilisez des dossiers de données distincts. |
 | `--test-notification` | Transmet une notification de test à Windows sans identifiants Twitch. |
 | `--help` | Affiche les options disponibles. |
+
+### Configuration du service autonome
+
+Les commandes lancées depuis les sources peuvent lire `.env` dans leur dossier de travail. Le fichier [.env.example](.env.example) contient les noms de configuration. Dans l’environnement de développement de ce dépôt, `coffre deployer alerte-bloodborne-frlive` sous Git Bash synchronise le fichier ignoré par Git. L’installation destinée aux utilisateurs configure Twitch directement depuis l’interface.
+
+| Variable | Utilisation |
+| --- | --- |
+| `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` | Paire d’identifiants de l’application Twitch pour la ligne de commande. |
+| `DATABASE_PATH` | Emplacement de la base du service autonome. Par défaut, `data/alerts.sqlite3` dans le dossier de travail. |
+| `POLL_INTERVAL_SECONDS` | Intervalle initial, entre 15 et 3 600 secondes. |
+| `NOTIFY_EXISTING_ON_FIRST_RUN` | Choix initial pour les directs déjà présents, `true` ou `false`. |
+| `RUST_LOG` | Niveau des journaux du service en console, par exemple `info`. |
 
 L’intégration continue compile et teste le service sur Windows et Linux. Les notifications natives et le logiciel de bureau distribué ciblent Windows. La licence MIT est celle du dépôt d’origine. [Licence](LICENSE)
