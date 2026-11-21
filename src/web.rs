@@ -1,10 +1,16 @@
 use crate::{
+    credentials::Credentials,
     notification::DesktopNotifier,
-    runtime::{ADDRESS, Control, Preferences, Status},
+    runtime::{Control, Preferences, Status},
+    store::History,
+    twitch::Category,
 };
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Request, State, rejection::JsonRejection},
+    extract::{
+        DefaultBodyLimit, Query, Request, State,
+        rejection::{JsonRejection, QueryRejection},
+    },
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -13,15 +19,39 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+#[cfg(test)]
+const ADDRESS: &str = "127.0.0.1:37219";
+#[cfg(test)]
 const LOOPBACK_ALIAS: &str = "localhost:37219";
 const RESPONSE_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
-pub(crate) fn router(control: Arc<Control>) -> Router {
+pub(crate) fn router(control: Arc<Control>, port: u16) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/style.css", get(style))
         .route("/app.js", get(script))
+        .route(
+            "/lists.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/lists.js"),
+                )
+            }),
+        )
+        .route(
+            "/mark.svg",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "image/svg+xml")],
+                    include_str!("../web/mark.svg"),
+                )
+            }),
+        )
         .route("/api/status", get(status))
+        .route("/api/categories", get(categories))
+        .route("/api/history", get(history))
+        .route("/api/credentials", post(credentials))
         .route("/api/settings", post(settings))
         .route("/api/monitoring", post(monitoring))
         .route("/api/check-now", post(check_now))
@@ -29,11 +59,11 @@ pub(crate) fn router(control: Arc<Control>) -> Router {
         .route("/api/shutdown", post(shutdown))
         .with_state(control)
         .layer(DefaultBodyLimit::max(4096))
-        .layer(middleware::from_fn(protect_local))
+        .layer(middleware::from_fn_with_state(port, protect_local))
 }
 
-async fn protect_local(request: Request, next: Next) -> Response {
-    let mut response = match validate_request(&request) {
+async fn protect_local(State(port): State<u16>, request: Request, next: Next) -> Response {
+    let mut response = match validate_request(&request, port) {
         Ok(()) => next.run(request).await,
         Err(error) => error.into_response(),
     };
@@ -54,22 +84,24 @@ async fn protect_local(request: Request, next: Next) -> Response {
     response
 }
 
-fn validate_request(request: &Request) -> Result<(), ApiError> {
+fn validate_request(request: &Request, port: u16) -> Result<(), ApiError> {
     let headers = request.headers();
     let host = single_header(headers, header::HOST.as_str())
-        .filter(|host| matches!(*host, ADDRESS | LOOPBACK_ALIAS))
+        .filter(|host| *host == format!("127.0.0.1:{port}") || *host == format!("localhost:{port}"))
         .ok_or(ApiError(StatusCode::FORBIDDEN, "Adresse locale requise."))?;
+    if headers
+        .get("sec-fetch-site")
+        .is_some_and(|v| v == "cross-site")
+        && request.uri().path().starts_with("/api/")
+    {
+        return Err(ApiError(StatusCode::FORBIDDEN, "Requête locale requise."));
+    }
     if request.method() != Method::POST {
         return Ok(());
     }
-    let origin = single_header(headers, header::ORIGIN.as_str());
-    if origin
-        != Some(if host == ADDRESS {
-            "http://127.0.0.1:37219"
-        } else {
-            "http://localhost:37219"
-        })
-        || single_header(headers, "x-bloodborne-request") != Some("local")
+    let origin = format!("http://{host}");
+    if single_header(headers, header::ORIGIN.as_str()) != Some(origin.as_str())
+        || single_header(headers, "x-twitch-live-alert") != Some("local")
     {
         return Err(ApiError(StatusCode::FORBIDDEN, "Requête locale requise."));
     }
@@ -112,6 +144,66 @@ async fn script() -> impl IntoResponse {
 
 async fn status(State(control): State<Arc<Control>>) -> Json<Status> {
     Json(control.status())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct Search {
+    q: String,
+}
+
+#[derive(Serialize)]
+struct Categories {
+    items: Vec<Category>,
+}
+
+fn query<T>(input: Result<Query<T>, QueryRejection>) -> Result<T, ApiError> {
+    input.map(|Query(value)| value).map_err(|_| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            "Paramètres de recherche invalides.",
+        )
+    })
+}
+
+async fn categories(
+    State(control): State<Arc<Control>>,
+    input: Result<Query<Search>, QueryRejection>,
+) -> Result<Json<Categories>, ApiError> {
+    Ok(Json(Categories {
+        items: control.categories(query(input)?.q).await?,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryQuery {
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    offset: u32,
+    #[serde(default = "page_size")]
+    limit: u32,
+}
+
+fn page_size() -> u32 {
+    50
+}
+
+async fn history(
+    State(control): State<Arc<Control>>,
+    input: Result<Query<HistoryQuery>, QueryRejection>,
+) -> Result<Json<History>, ApiError> {
+    let q = query(input)?;
+    Ok(Json(control.history(q.q, q.offset, q.limit).await?))
+}
+
+async fn credentials(
+    State(control): State<Arc<Control>>,
+    body: Result<Json<Credentials>, JsonRejection>,
+) -> Result<Json<Status>, ApiError> {
+    control.credentials(read_body(body)?).await?;
+    Ok(Json(control.status()))
 }
 
 async fn settings(
@@ -217,7 +309,7 @@ mod tests {
                 "/",
                 post(|| async { StatusCode::OK }).get(|| async { StatusCode::OK }),
             )
-            .layer(middleware::from_fn(protect_local));
+            .layer(middleware::from_fn_with_state(37219u16, protect_local));
         for (method, host, origin, marker, content_type, expected) in [
             (Method::GET, ADDRESS, "", "", "", StatusCode::OK),
             (
@@ -291,7 +383,7 @@ mod tests {
                 .header("host", host);
             for (name, value) in [
                 ("origin", origin),
-                ("x-bloodborne-request", marker),
+                ("x-twitch-live-alert", marker),
                 ("content-type", content_type),
             ] {
                 if !value.is_empty() {

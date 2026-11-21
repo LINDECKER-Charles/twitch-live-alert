@@ -27,10 +27,7 @@ impl std::error::Error for ApiError {}
 
 pub fn client() -> Result<Client> {
     Ok(Client::builder()
-        .user_agent(concat!(
-            "alert-bloodborne-fr-live/",
-            env!("CARGO_PKG_VERSION")
-        ))
+        .user_agent(concat!("twitch-live-alert/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
@@ -62,8 +59,8 @@ pub async fn checked(response: Response, service: &'static str) -> Result<Respon
         .get("retry-after")
         .and_then(|v| v.to_str().ok())
         .and_then(parse_delay);
-    if status == StatusCode::TOO_MANY_REQUESTS && retry_after.is_none() {
-        retry_after = response
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        let reset_delay = response
             .headers()
             .get("ratelimit-reset")
             .and_then(|v| v.to_str().ok())
@@ -71,6 +68,7 @@ pub async fn checked(response: Response, service: &'static str) -> Result<Respon
             .map(|reset| {
                 Duration::from_secs(reset.saturating_sub(unix_seconds()).saturating_add(1))
             });
+        retry_after = retry_after.max(reset_delay);
         if retry_after.is_none() {
             // Some API gateways provide a fractional retry_after in the JSON body.
             if let Ok(body) = response.json::<serde_json::Value>().await {
@@ -92,6 +90,9 @@ pub async fn checked(response: Response, service: &'static str) -> Result<Respon
 }
 
 fn parse_delay(value: &str) -> Option<Duration> {
+    if let Ok(date) = httpdate::parse_http_date(value) {
+        return Some(date.duration_since(SystemTime::now()).unwrap_or_default());
+    }
     value
         .parse::<f64>()
         .ok()

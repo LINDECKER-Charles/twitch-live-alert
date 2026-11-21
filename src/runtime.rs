@@ -1,101 +1,45 @@
+mod settings;
+#[cfg(test)]
+mod tests;
+mod worker;
+pub(crate) use settings::Preferences;
+use settings::Settings;
+use worker::run_worker;
+
 use crate::{
     config::{Config, Mode},
+    credentials::Credentials,
     http,
-    notification::{DesktopNotifier, NotificationError},
-    store::{Delivery, Store},
-    twitch::{Stream, Twitch},
-    watcher::Watcher,
+    notification::DesktopNotifier,
+    startup::{set_startup, startup_enabled},
+    store::{Delivery, History, Store},
+    twitch::{Category, Stream, StreamFilter, Twitch},
     web,
 };
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
-    fs,
     future::Future,
-    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
 };
 use tokio::{
     net::TcpListener,
     sync::{mpsc, watch},
-    time::{Instant, sleep_until},
+    time::Instant,
 };
 use tracing::{error, info, warn};
 
-pub(crate) const ADDRESS: &str = "127.0.0.1:37219";
 const SETTINGS_PATH: &str = "data/settings.json";
 const RETRY_MESSAGE: &str = "Une vérification est en attente de réessai. La prochaine tentative se lancera automatiquement.";
 const SETTINGS_ERROR: &str = "Impossible d'enregistrer les réglages locaux.";
-const STARTUP_ERROR: &str = "Impossible de modifier le démarrage automatique de Windows.";
 const STORAGE_ERROR: &str = "La surveillance est arrêtée car la base locale est inaccessible.";
+#[cfg(windows)]
 const NOTIFICATION_ERROR: &str =
     "Windows n'a pas accepté une notification. Vérifiez les autorisations de notification.";
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Preferences {
-    pub poll_interval_seconds: u64,
-    pub notify_existing_on_first_run: bool,
-    pub start_with_windows: bool,
-}
-
-#[derive(Clone, Copy, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Settings {
-    preferences: Preferences,
-    enabled: bool,
-}
-
-impl Settings {
-    fn defaults(config: Option<&Config>) -> Self {
-        Self {
-            preferences: Preferences {
-                poll_interval_seconds: config.map_or(60, |value| value.poll_interval.as_secs()),
-                notify_existing_on_first_run: config.is_none_or(|value| value.notify_existing),
-                start_with_windows: false,
-            },
-            enabled: true,
-        }
-    }
-
-    fn load(path: &Path, defaults: Self) -> Self {
-        match fs::read(path) {
-            Ok(bytes) => match serde_json::from_slice::<Self>(&bytes) {
-                Ok(settings) if settings.valid() => settings,
-                _ => {
-                    warn!("Réglages locaux invalides, valeurs par défaut utilisées");
-                    defaults
-                }
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => defaults,
-            Err(_) => {
-                warn!("Réglages locaux illisibles, valeurs par défaut utilisées");
-                defaults
-            }
-        }
-    }
-
-    fn valid(self) -> bool {
-        (15..=3600).contains(&self.preferences.poll_interval_seconds)
-    }
-
-    fn save(self, path: &Path) -> Result<()> {
-        let directory = path.parent().context("Chemin de réglages invalide")?;
-        fs::create_dir_all(directory)?;
-        let mut file = tempfile::NamedTempFile::new_in(directory)?;
-        serde_json::to_writer_pretty(&mut file, &self)?;
-        file.write_all(b"\n")?;
-        file.as_file().sync_all()?;
-        file.persist(path)?;
-        Ok(())
-    }
-
-    fn interval(self) -> Duration {
-        Duration::from_secs(self.preferences.poll_interval_seconds)
-    }
-}
+#[cfg(not(windows))]
+const NOTIFICATION_ERROR: &str = "Les notifications de bureau nécessitent une session Windows.";
 
 #[derive(Clone, Serialize)]
 pub(crate) struct Status {
@@ -141,6 +85,7 @@ impl From<&Stream> for LiveStream {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ControlError {
     Invalid(&'static str),
     Unavailable(&'static str),
@@ -151,6 +96,8 @@ pub(crate) struct Control {
     status: Mutex<Status>,
     settings: watch::Sender<Settings>,
     settings_path: PathBuf,
+    database_path: Option<PathBuf>,
+    twitch: watch::Sender<Option<Twitch>>,
     changes: tokio::sync::Mutex<()>,
     checks: mpsc::Sender<()>,
     shutdown: watch::Sender<bool>,
@@ -160,18 +107,21 @@ impl Control {
     fn new(
         settings_path: PathBuf,
         settings: Settings,
-        configured: bool,
-        worker_available: bool,
+        twitch: Option<Twitch>,
+        database_path: Option<PathBuf>,
     ) -> (Arc<Self>, mpsc::Receiver<()>) {
-        let (settings_sender, _) = watch::channel(settings);
+        let configured = twitch.is_some();
+        let worker_available = database_path.is_some();
+        let (twitch, _) = watch::channel(twitch);
+        let (settings_sender, _) = watch::channel(settings.clone());
         let (shutdown, _) = watch::channel(false);
         let (checks, check_receiver) = mpsc::channel(1);
         let control = Self {
             status: Mutex::new(Status {
-                app_id: "bloodborne-fr-live",
+                app_id: "twitch-live-alert",
                 process_id: std::process::id(),
                 app_version: env!("CARGO_PKG_VERSION"),
-                running: worker_available && settings.enabled,
+                running: configured && worker_available && settings.enabled,
                 configured,
                 preferences: settings.preferences,
                 last_checked_at: None,
@@ -185,6 +135,8 @@ impl Control {
             }),
             settings: settings_sender,
             settings_path,
+            twitch,
+            database_path,
             changes: tokio::sync::Mutex::new(()),
             checks,
             shutdown,
@@ -203,17 +155,38 @@ impl Control {
         status
     }
 
-    pub async fn change_preferences(&self, preferences: Preferences) -> Result<(), ControlError> {
+    pub async fn change_preferences(
+        &self,
+        mut preferences: Preferences,
+    ) -> Result<(), ControlError> {
         let _guard = self.changes.lock().await;
-        let settings = Settings {
-            preferences,
-            ..*self.settings.borrow()
-        };
-        if !settings.valid() {
+        preferences.filter.category = preferences.filter.category.trim().to_owned();
+        preferences.filter.language = preferences.filter.language.trim().to_ascii_lowercase();
+        if !preferences.filter.valid() {
+            return Err(ControlError::Invalid(
+                "Saisissez une catégorie Twitch et un code de langue valide.",
+            ));
+        }
+        if !(15..=3600).contains(&preferences.poll_interval_seconds) {
             return Err(ControlError::Invalid(
                 "L'intervalle doit être compris entre 15 et 3600 secondes.",
             ));
         }
+        let previous = self.settings.borrow().clone();
+        let connection = self.twitch.borrow().clone();
+        if preferences.filter.category != previous.preferences.filter.category
+            && let Some(mut twitch) = connection
+        {
+            let category = twitch
+                .category(&preferences.filter.category)
+                .await
+                .map_err(category_error)?;
+            preferences.filter.category = category.name;
+        }
+        let settings = Settings {
+            preferences: preferences.clone(),
+            ..previous
+        };
         let existing_startup = startup_enabled().unwrap_or(false);
         if existing_startup != preferences.start_with_windows {
             set_startup(preferences.start_with_windows)
@@ -234,14 +207,18 @@ impl Control {
 
     pub async fn change_monitoring(&self, enabled: bool) -> Result<(), ControlError> {
         let _guard = self.changes.lock().await;
-        if enabled && !self.lock_status().worker_available {
+        let available = {
+            let status = self.lock_status();
+            status.configured && status.worker_available
+        };
+        if enabled && !available {
             return Err(ControlError::Unavailable(
                 "La surveillance est indisponible. Vérifiez le message d'état.",
             ));
         }
         let settings = Settings {
             enabled,
-            ..*self.settings.borrow()
+            ..self.settings.borrow().clone()
         };
         if settings.save(&self.settings_path).is_err() {
             return Err(ControlError::Operation(SETTINGS_ERROR));
@@ -252,12 +229,117 @@ impl Control {
 
     fn apply(&self, settings: Settings) {
         let mut status = self.lock_status();
-        status.preferences = settings.preferences;
-        status.running = status.worker_available && settings.enabled && !*self.shutdown.borrow();
+        if status.preferences.filter != settings.preferences.filter {
+            status.live_streams.clear();
+            status.retry_not_before = None;
+            status.next_check_at = None;
+            status.last_checked_at = None;
+            if status.worker_available {
+                status.last_error = None;
+            }
+        }
+        status.preferences = settings.preferences.clone();
+        status.running = status.configured
+            && status.worker_available
+            && settings.enabled
+            && !*self.shutdown.borrow();
         if !status.running {
             status.next_check_at = None;
         }
         self.settings.send_replace(settings);
+    }
+
+    pub async fn credentials(&self, pair: Credentials) -> Result<(), ControlError> {
+        if !pair.valid() {
+            return Err(ControlError::Invalid(
+                "Renseignez les deux identifiants Twitch sans espace.",
+            ));
+        }
+        let _guard = self.changes.lock().await;
+        let client = http::client()
+            .map_err(|_| ControlError::Operation("Impossible de contacter Twitch."))?;
+        let twitch = Twitch::new(client, pair.client_id.clone(), pair.client_secret.clone());
+        self.install_credentials(pair, twitch).await
+    }
+
+    async fn install_credentials(
+        &self,
+        pair: Credentials,
+        twitch: Twitch,
+    ) -> Result<(), ControlError> {
+        twitch.validate_credentials().await.map_err(|e| {
+            if e.downcast_ref::<http::ApiError>()
+                .and_then(|a| a.status)
+                .is_some_and(|s| matches!(s.as_u16(), 400 | 401 | 403))
+            {
+                ControlError::Invalid(
+                    "Twitch a refusé ces identifiants. Vérifiez le Client ID et le Client Secret.",
+                )
+            } else {
+                ControlError::Unavailable(
+                    "Impossible de valider les identifiants auprès de Twitch. Réessayez plus tard.",
+                )
+            }
+        })?;
+        pair.save(&self.settings_path.with_file_name("twitch.dpapi"))
+            .map_err(|_| {
+                ControlError::Operation(
+                    "Impossible de protéger les identifiants dans ce profil Windows.",
+                )
+            })?;
+        let mut status = self.lock_status();
+        status.configured = true;
+        status.running =
+            status.worker_available && self.settings.borrow().enabled && !*self.shutdown.borrow();
+        status.retry_not_before = None;
+        if status.worker_available {
+            status.last_error = None;
+        }
+        self.twitch.send_replace(Some(twitch));
+        Ok(())
+    }
+
+    pub async fn categories(&self, query: String) -> Result<Vec<Category>, ControlError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        if query.chars().count() > 200 {
+            return Err(ControlError::Invalid("Recherche trop longue."));
+        }
+        let twitch = self
+            .twitch
+            .borrow()
+            .clone()
+            .ok_or(ControlError::Unavailable(
+                "Connectez votre application Twitch pour rechercher une catégorie.",
+            ))?;
+        twitch
+            .search_categories(query)
+            .await
+            .map_err(category_error)
+    }
+
+    pub async fn history(
+        &self,
+        query: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<History, ControlError> {
+        let path = self
+            .database_path
+            .clone()
+            .ok_or(ControlError::Operation(STORAGE_ERROR))?;
+        if !(1..=200).contains(&limit) || query.chars().count() > 256 {
+            return Err(ControlError::Invalid("Pagination ou recherche invalide."));
+        }
+        tokio::task::spawn_blocking(move || Store::history_at(&path, &query, offset, limit))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .ok_or(ControlError::Operation(
+                "Impossible de lire le journal des alertes.",
+            ))
     }
 
     pub fn check_now(&self) -> Result<(), ControlError> {
@@ -297,13 +379,38 @@ impl Control {
     }
 }
 
+pub async fn import_credentials(profile: &Path) -> Result<()> {
+    let value = |key| {
+        std::env::var(key)
+            .ok()
+            .map(|v| v.trim().to_owned())
+            .unwrap_or_default()
+    };
+    let pair = Credentials {
+        client_id: value("TWITCH_CLIENT_ID"),
+        client_secret: value("TWITCH_CLIENT_SECRET"),
+    };
+    anyhow::ensure!(
+        pair.valid(),
+        "Les identifiants TWITCH_CLIENT_ID et TWITCH_CLIENT_SECRET doivent être renseignés."
+    );
+    let twitch = Twitch::new(
+        http::client()?,
+        pair.client_id.clone(),
+        pair.client_secret.clone(),
+    );
+    twitch.validate_credentials().await?;
+    pair.save(&profile.join(crate::credentials::CREDENTIALS_FILE))
+}
+
 pub async fn serve(
+    port: u16,
     config: Result<Config>,
     shutdown_signal: impl Future<Output = Result<()>>,
 ) -> Result<()> {
-    let listener = TcpListener::bind(ADDRESS)
+    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
         .await
-        .context("Impossible d'ouvrir l'interface locale sur le port 37219. Vérifiez si elle est déjà lancée.")?;
+        .with_context(|| format!("Impossible d'ouvrir l'interface locale sur le port {port}. Vérifiez si elle est déjà lancée."))?;
     let fallback = config
         .is_err()
         .then(|| Config::from_env(Mode::TestNotification).ok())
@@ -318,35 +425,37 @@ pub async fn serve(
         |config| config.database_path.clone(),
     );
     let store = Store::open(&database_path).and_then(|store| Ok((store.recent_history()?, store)));
+    let twitch = config
+        .ok()
+        .map(|config| {
+            Ok::<_, anyhow::Error>(Twitch::new(
+                http::client()?,
+                config.client_id,
+                config.client_secret,
+            ))
+        })
+        .transpose()?;
     let (control, receiver) = Control::new(
         path,
         settings,
-        config.is_ok(),
-        config.is_ok() && store.is_ok(),
+        twitch,
+        store.is_ok().then_some(database_path),
     );
-    let watcher = match (config, store) {
-        (Ok(config), Ok((history, store))) => {
+    let store = match store {
+        Ok((history, store)) => {
             control.lock_status().notifications = history;
-            let notifier = DesktopNotifier::new().unwrap_or(DesktopNotifier);
-            Some(watcher(config, store, notifier)?)
+            Some(store)
         }
-        (Err(error), Ok((history, _))) => {
-            control.lock_status().notifications = history;
-            control.fail_worker(format!(
-                "Twitch n'est pas configuré. {error} Relancez l'application après configuration."
-            ));
-            None
-        }
-        (_, Err(error)) => {
+        Err(error) => {
             error!("{error:#}");
             control.fail_worker(STORAGE_ERROR);
             None
         }
     };
-    info!("Interface locale ouverte sur http://{ADDRESS}");
+    info!("Interface locale ouverte sur http://127.0.0.1:{port}");
     let worker = async {
-        if let Some(watcher) = watcher
-            && let Err(error) = run_worker(watcher, &control, receiver).await
+        if let Some(store) = store
+            && let Err(error) = run_worker(store, DesktopNotifier, &control, receiver).await
         {
             error!("{error:#}");
             control.fail_worker(STORAGE_ERROR);
@@ -354,7 +463,7 @@ pub async fn serve(
     };
     let mut shutdown = control.shutdown.subscribe();
     let server = async {
-        axum::serve(listener, web::router(control.clone()))
+        axum::serve(listener, web::router(control.clone(), port))
             .with_graceful_shutdown(async move {
                 let _ = shutdown.wait_for(|stop| *stop).await;
             })
@@ -393,11 +502,18 @@ pub async fn watch_in_terminal(
     config: Config,
     shutdown_signal: impl Future<Output = Result<()>>,
 ) -> Result<()> {
-    let settings = Settings::defaults(Some(&config));
+    let mut settings = Settings::load(Path::new(SETTINGS_PATH), Settings::defaults(Some(&config)));
+    // --no-web is an explicit command to start watching from the terminal.
+    settings.enabled = true;
     let store = Store::open(&config.database_path)?;
-    let watcher = watcher(config, store, DesktopNotifier::new()?)?;
-    let (control, receiver) = Control::new(PathBuf::new(), settings, true, true);
-    let worker = run_worker(watcher, &control, receiver);
+    let twitch = Twitch::new(http::client()?, config.client_id, config.client_secret);
+    let (control, receiver) = Control::new(
+        PathBuf::new(),
+        settings,
+        Some(twitch),
+        Some(config.database_path),
+    );
+    let worker = run_worker(store, DesktopNotifier, &control, receiver);
     tokio::pin!(worker, shutdown_signal);
     tokio::select! {
         result = &mut worker => result,
@@ -409,225 +525,24 @@ pub async fn watch_in_terminal(
     }
 }
 
-fn watcher(
-    config: Config,
-    store: Store,
-    notifier: DesktopNotifier,
-) -> Result<Watcher<DesktopNotifier>> {
-    Ok(Watcher {
-        twitch: Twitch::new(http::client()?, config.client_id, config.client_secret),
-        notifier,
-        store,
-        notify_existing: config.notify_existing,
-        last_streams: Vec::new(),
-    })
-}
-
-async fn run_worker(
-    mut watcher: Watcher<DesktopNotifier>,
-    control: &Control,
-    mut checks: mpsc::Receiver<()>,
-) -> Result<()> {
-    let mut settings = control.settings.subscribe();
-    let mut shutdown = control.shutdown.subscribe();
-    let mut last_finished = None;
-    let mut retry_until: Option<Instant> = None;
-    let mut failures = 0u32;
-    while !*shutdown.borrow() {
-        let current = *settings.borrow_and_update();
-        if !current.enabled {
-            last_finished = None;
-            while checks.try_recv().is_ok() {}
-            tokio::select! {
-                _ = shutdown.changed() => break,
-                _ = settings.changed() => continue,
-            }
+fn category_error(error: anyhow::Error) -> ControlError {
+    if let Some(api) = error.downcast_ref::<http::ApiError>() {
+        if api.reason == "catégorie introuvable" {
+            return ControlError::Invalid(
+                "Cette catégorie est introuvable. Choisissez son nom exact sur Twitch.",
+            );
         }
-        let now = Instant::now();
-        let due = last_finished
-            .map_or(now, |last: Instant| last + current.interval())
-            .max(retry_until.unwrap_or(now));
-        {
-            let mut status = control.lock_status();
-            if status.running {
-                status.next_check_at = Some(
-                    http::unix_seconds()
-                        .saturating_add(due.saturating_duration_since(now).as_secs()),
-                );
-            }
-        }
-        tokio::select! {
-            biased;
-            _ = shutdown.changed() => break,
-            _ = settings.changed() => continue,
-            _ = sleep_until(due) => { let _ = checks.try_recv(); },
-            _ = async {
-                if let Some(deadline) = retry_until {
-                    sleep_until(deadline).await;
-                }
-                checks.recv().await
-            } => {}
-        }
-        control.lock_status().next_check_at = None;
-        watcher.notify_existing = current.preferences.notify_existing_on_first_run;
-        let (cancel, mut cancel_receiver) = watch::channel(false);
-        let (result, cancelled) = {
-            let cycle = watcher.cycle_with_shutdown(&mut cancel_receiver);
-            tokio::pin!(cycle);
-            tokio::select! {
-                biased;
-                _ = shutdown.wait_for(|stop| *stop) => {
-                    cancel.send_replace(true);
-                    (cycle.await, true)
-                }
-                _ = settings.wait_for(|value| !value.enabled) => {
-                    cancel.send_replace(true);
-                    (cycle.await, true)
-                }
-                result = &mut cycle => (result, false),
-            }
-        };
-        let last_error = match result {
-            Ok(_) => {
-                if !cancelled {
-                    failures = 0;
-                    retry_until = None;
-                }
-                None
-            }
-            Err(error) => {
-                // Stop if an alert could have been delivered without a durable record.
-                let api_error = error.downcast_ref::<http::ApiError>();
-                if api_error.is_none() && error.downcast_ref::<NotificationError>().is_none() {
-                    return Err(error);
-                }
-                failures = failures.saturating_add(1);
-                let delay = http::retry_delay(&error, failures, current.interval());
-                retry_until = Instant::now()
-                    .checked_add(delay)
-                    .or_else(|| Some(Instant::now() + Duration::from_secs(3600)));
-                error!(retry_seconds = delay.as_secs_f64(), "{error:#}");
-                Some(api_error.map_or_else(|| NOTIFICATION_ERROR.to_owned(), ToString::to_string))
-            }
-        };
-        let notifications = watcher.store.recent_history()?;
-        let mut status = control.lock_status();
-        status.notifications = notifications;
-        status.retry_not_before = retry_until;
-        status.live_streams = watcher.last_streams.iter().map(LiveStream::from).collect();
-        if !cancelled || last_error.is_some() {
-            status.last_checked_at = Some(http::unix_seconds());
-            status.last_error = last_error;
-            last_finished = Some(Instant::now());
+        if api.status.is_some_and(|status| status.as_u16() == 429) {
+            return ControlError::Unavailable(
+                "Twitch limite les requêtes. Réessayez après le délai indiqué par Twitch.",
+            );
         }
     }
-    Ok(())
+    ControlError::Unavailable("Impossible de consulter les catégories Twitch. Réessayez plus tard.")
 }
 
-#[cfg(windows)]
-fn startup_enabled() -> Result<bool> {
-    use windows::Win32::{
-        System::Com::CoTaskMemFree,
-        UI::Shell::{FOLDERID_Startup, KF_FLAG_DONT_VERIFY, SHGetKnownFolderPath},
-    };
-    let raw = unsafe { SHGetKnownFolderPath(&FOLDERID_Startup, KF_FLAG_DONT_VERIFY, None)? };
-    let path = unsafe { raw.to_string() };
-    unsafe { CoTaskMemFree(Some(raw.0.cast())) };
-    Ok(PathBuf::from(path?)
-        .join("Bloodborne FR Live.lnk")
-        .is_file())
-}
-
-#[cfg(not(windows))]
-fn startup_enabled() -> Result<bool> {
-    Ok(false)
-}
-
-#[cfg(windows)]
-async fn set_startup(enabled: bool) -> Result<(), &'static str> {
-    let windows_root = std::env::var_os("SystemRoot").ok_or(STARTUP_ERROR)?;
-    let powershell =
-        PathBuf::from(windows_root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
-    let script = if enabled {
-        "install-startup.ps1"
-    } else {
-        "uninstall-startup.ps1"
-    };
-    let path = std::env::current_dir()
-        .map_err(|_| STARTUP_ERROR)?
-        .join("scripts")
-        .join(script);
-    let mut command = tokio::process::Command::new(powershell);
-    command
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "RemoteSigned",
-            "-File",
-        ])
-        .arg(path)
-        .env_remove("TWITCH_CLIENT_ID")
-        .env_remove("TWITCH_CLIENT_SECRET")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .creation_flags(0x08000000)
-        .kill_on_drop(true);
-    let status = tokio::time::timeout(Duration::from_secs(15), command.status())
-        .await
-        .map_err(|_| STARTUP_ERROR)?
-        .map_err(|_| STARTUP_ERROR)?;
-    if !status.success() || startup_enabled().map_err(|_| STARTUP_ERROR)? != enabled {
-        return Err(STARTUP_ERROR);
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-async fn set_startup(_: bool) -> Result<(), &'static str> {
-    Err(STARTUP_ERROR)
-}
-
-#[cfg(test)]
-mod settings_tests {
-    use super::*;
-
-    #[test]
-    fn persists_pause_and_replaces_settings_atomically() -> Result<()> {
-        let directory = tempfile::tempdir()?;
-        let settings_path = directory.path().join("data/settings.json");
-        let defaults = Settings::defaults(None);
-        defaults.save(&settings_path)?;
-        let paused = Settings {
-            preferences: Preferences {
-                poll_interval_seconds: 120,
-                notify_existing_on_first_run: false,
-                start_with_windows: false,
-            },
-            enabled: false,
-        };
-        paused.save(&settings_path)?;
-        let reopened = Settings::load(&settings_path, defaults);
-        assert_eq!(paused.preferences, reopened.preferences);
-        assert!(!reopened.enabled);
-        Ok(())
-    }
-
-    #[test]
-    fn check_now_rejects_retry_cooldown_and_can_resume_afterward() {
-        let defaults = Settings::defaults(None);
-        let (control, mut receiver) = Control::new(PathBuf::new(), defaults, true, true);
-        control.lock_status().retry_not_before = Some(Instant::now() + Duration::from_secs(60));
-
-        assert!(matches!(
-            control.check_now(),
-            Err(ControlError::Unavailable(RETRY_MESSAGE))
-        ));
-        assert_eq!(receiver.try_recv(), Err(mpsc::error::TryRecvError::Empty));
-
-        control.lock_status().retry_not_before = Some(Instant::now());
-        assert!(control.check_now().is_ok());
-        assert_eq!(receiver.try_recv(), Ok(()));
-    }
+pub fn stored_selection(config: &Config) -> (StreamFilter, bool) {
+    let preferences =
+        Settings::load(Path::new(SETTINGS_PATH), Settings::defaults(Some(config))).preferences;
+    (preferences.filter, preferences.notify_existing_on_first_run)
 }

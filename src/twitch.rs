@@ -1,9 +1,10 @@
 use crate::http;
 use anyhow::Result;
 use reqwest::{Client, StatusCode};
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::HashSet,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -25,8 +26,10 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub fn matches(&self, game_id: &str) -> bool {
-        self.kind == "live" && self.game_id == game_id && self.language == "fr"
+    pub fn matches(&self, game_id: &str, language: &str) -> bool {
+        self.kind == "live"
+            && self.game_id == game_id
+            && (language.is_empty() || self.language.eq_ignore_ascii_case(language))
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -60,10 +63,10 @@ struct Page<T> {
 struct Pagination {
     cursor: Option<String>,
 }
-#[derive(Deserialize)]
-struct Game {
-    id: String,
-    name: String,
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct Category {
+    pub(crate) id: String,
+    pub(crate) name: String,
 }
 #[derive(Deserialize)]
 struct TokenResponse {
@@ -81,37 +84,96 @@ struct Token {
     validated_at: Option<Instant>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct StreamFilter {
+    pub category: String,
+    pub language: String,
+}
+
+impl Default for StreamFilter {
+    fn default() -> Self {
+        Self {
+            category: "Bloodborne".into(),
+            language: "fr".into(),
+        }
+    }
+}
+
+impl StreamFilter {
+    pub(crate) fn valid(&self) -> bool {
+        !self.category.trim().is_empty()
+            && self.category.chars().count() <= 200
+            && !self.category.chars().any(char::is_control)
+            && (self.language.is_empty()
+                || self.language == "other"
+                || (self.language.len() == 2
+                    && self.language.bytes().all(|b| b.is_ascii_lowercase())))
+    }
+
+    pub(crate) fn baseline_key(&self) -> String {
+        format!(
+            "initialized:{}:{}",
+            self.language,
+            self.category.to_lowercase()
+        )
+    }
+}
+
+#[derive(Clone)]
 pub struct Twitch {
+    session: Arc<tokio::sync::Mutex<Session>>,
+    category: Option<Category>,
+}
+
+struct Session {
     client: Client,
     client_id: String,
     client_secret: String,
     api: String,
     oauth: String,
     token: Option<Token>,
-    game_id: Option<String>,
+    cooldown: Option<Instant>,
 }
 
 impl Twitch {
     pub fn new(client: Client, client_id: String, client_secret: String) -> Self {
-        Self {
+        let session = Session {
             client,
             client_id,
             client_secret,
             api: API.into(),
             oauth: OAUTH.into(),
             token: None,
-            game_id: None,
+            cooldown: None,
+        };
+        Self {
+            session: Arc::new(tokio::sync::Mutex::new(session)),
+            category: None,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn for_test(client: Client, base: &str) -> Self {
-        let mut twitch = Self::new(client, "test-client".into(), "test-secret".into());
-        twitch.api = format!("{base}/helix");
-        twitch.oauth = format!("{base}/oauth2");
+        let twitch = Self::new(client, "test-client".into(), "test-secret".into());
+        {
+            let mut session = twitch.session.try_lock().unwrap();
+            session.api = format!("{base}/helix");
+            session.oauth = format!("{base}/oauth2");
+        }
         twitch
     }
 
+    pub(crate) fn same_session(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.session, &other.session)
+    }
+
+    pub async fn validate_credentials(&self) -> Result<()> {
+        self.session.lock().await.ensure_token().await
+    }
+}
+
+impl Session {
     async fn acquire_token(&mut self) -> Result<()> {
         self.token = None;
         let response = self
@@ -215,6 +277,36 @@ impl Twitch {
         endpoint: &str,
         query: &[(String, String)],
     ) -> Result<T> {
+        if let Some(remaining) = self
+            .cooldown
+            .and_then(|until| until.checked_duration_since(Instant::now()))
+        {
+            return Err(http::ApiError {
+                service: "Twitch API",
+                status: Some(StatusCode::TOO_MANY_REQUESTS),
+                retry_after: Some(remaining),
+                reason: "limite de requêtes atteinte",
+            }
+            .into());
+        }
+        let result = self.request(endpoint, query).await;
+        if let Err(error) = &result
+            && let Some(api) = error.downcast_ref::<http::ApiError>()
+            && api.status == Some(StatusCode::TOO_MANY_REQUESTS)
+        {
+            let delay = api.retry_after.unwrap_or(Duration::from_secs(60));
+            if let Some(until) = Instant::now().checked_add(delay) {
+                self.cooldown = self.cooldown.max(Some(until));
+            }
+        }
+        result
+    }
+
+    async fn request<T: DeserializeOwned>(
+        &mut self,
+        endpoint: &str,
+        query: &[(String, String)],
+    ) -> Result<T> {
         for attempt in 0..2 {
             self.ensure_token().await?;
             let response = self
@@ -230,29 +322,95 @@ impl Twitch {
                 self.token = None;
                 continue;
             }
-            return http::json(http::checked(response, "Twitch API").await?, "Twitch API").await;
+            if response
+                .headers()
+                .get("ratelimit-remaining")
+                .and_then(|v| v.to_str().ok())
+                == Some("0")
+                && let Some(reset) = response
+                    .headers()
+                    .get("ratelimit-reset")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok())
+            {
+                self.cooldown = Instant::now().checked_add(Duration::from_secs(
+                    reset.saturating_sub(http::unix_seconds()).saturating_add(1),
+                ));
+            }
+            let response = http::checked(response, "Twitch API").await?;
+            return http::json(response, "Twitch API").await;
         }
         unreachable!()
     }
+}
 
-    pub async fn french_bloodborne_streams(&mut self) -> Result<Vec<Stream>> {
-        let game_id = match &self.game_id {
-            Some(id) => id.clone(),
-            None => {
-                let games: Page<Game> = self
-                    .get("games", &[("name".into(), "Bloodborne".into())])
-                    .await?;
-                let game = games
-                    .data
-                    .into_iter()
-                    .find(|g| g.name.eq_ignore_ascii_case("Bloodborne") && !g.id.is_empty())
-                    .ok_or_else(|| {
-                        http::protocol("Twitch API", "catégorie Bloodborne introuvable")
-                    })?;
-                self.game_id = Some(game.id.clone());
-                game.id
-            }
+impl Twitch {
+    pub(crate) async fn category(&mut self, name: &str) -> Result<Category> {
+        if let Some(category) = &self.category
+            && category.name.eq_ignore_ascii_case(name)
+        {
+            return Ok(category.clone());
+        }
+        let page: Page<Category> = self
+            .session
+            .lock()
+            .await
+            .get("games", &[("name".into(), name.into())])
+            .await?;
+        let category = page
+            .data
+            .into_iter()
+            .find(|category| !category.id.is_empty() && category.name.eq_ignore_ascii_case(name))
+            .ok_or_else(|| http::protocol("Twitch API", "catégorie introuvable"))?;
+        self.category = Some(category.clone());
+        Ok(category)
+    }
+
+    pub(crate) async fn search_categories(&self, query: &str) -> Result<Vec<Category>> {
+        let page: Page<Category> = self
+            .session
+            .lock()
+            .await
+            .get(
+                "search/categories",
+                &[
+                    ("query".into(), query.into()),
+                    ("first".into(), "12".into()),
+                ],
+            )
+            .await?;
+        Ok(page
+            .data
+            .into_iter()
+            .filter(|item| !item.id.is_empty() && !item.name.is_empty())
+            .collect())
+    }
+
+    async fn stream_page(
+        &self,
+        query: &[(String, String)],
+        continuation: bool,
+    ) -> Result<Page<Stream>> {
+        let page = self.session.lock().await.get("streams", query).await;
+        let Err(error) = &page else { return page };
+        let Some(api) = error.downcast_ref::<http::ApiError>() else {
+            return page;
         };
+        let delay = api.retry_after.unwrap_or(Duration::from_secs(60));
+        // Keep a valid cursor across one ordinary token-bucket reset. Return persistent
+        // failures to the scheduler without publishing an incomplete snapshot.
+        if continuation
+            && api.status == Some(StatusCode::TOO_MANY_REQUESTS)
+            && delay <= Duration::from_secs(120)
+        {
+            tokio::time::sleep(delay).await;
+            return self.session.lock().await.get("streams", query).await;
+        }
+        page
+    }
+
+    pub async fn streams(&mut self, filter: &StreamFilter) -> Result<Vec<Stream>> {
+        let game_id = self.category(&filter.category).await?.id;
         let mut streams = Vec::new();
         let mut cursor = None;
         let mut seen_cursors = HashSet::new();
@@ -260,16 +418,18 @@ impl Twitch {
         loop {
             let mut query = vec![
                 ("game_id".into(), game_id.clone()),
-                ("language".into(), "fr".into()),
                 ("type".into(), "live".into()),
                 ("first".into(), "100".into()),
             ];
+            if !filter.language.is_empty() {
+                query.push(("language".into(), filter.language.clone()));
+            }
             if let Some(cursor) = cursor {
                 query.push(("after".into(), cursor));
             }
-            let page: Page<Stream> = self.get("streams", &query).await?;
+            let page = self.stream_page(&query, !seen_cursors.is_empty()).await?;
             for stream in page.data {
-                if stream.matches(&game_id) {
+                if stream.matches(&game_id, &filter.language) {
                     stream.validate()?;
                     if seen_streams.insert(stream.id.clone()) {
                         streams.push(stream);

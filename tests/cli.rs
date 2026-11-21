@@ -5,7 +5,7 @@ use std::{
 use tempfile::TempDir;
 
 fn cli(dir: &Path, args: &[&str], vars: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_alert-bloodborne-fr-live"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_twitch-live-alert"));
     command.current_dir(dir).args(args);
     for key in [
         "TWITCH_CLIENT_ID",
@@ -14,6 +14,7 @@ fn cli(dir: &Path, args: &[&str], vars: &[(&str, &str)]) -> Output {
         "DATABASE_PATH",
         "NOTIFY_EXISTING_ON_FIRST_RUN",
         "RUST_LOG",
+        "TWITCH_LIVE_ALERT_DESKTOP_EXE",
     ] {
         command.env_remove(key);
     }
@@ -67,4 +68,28 @@ fn configuration_check_is_offline_and_does_not_echo_secrets() {
     );
     assert!(!text.contains("private-secret"));
     assert!(!dir.path().join("data").exists());
+}
+
+#[test]
+fn development_does_not_load_a_parent_profile_and_desktop_ignores_inherited_credentials() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join(".env"), b"POLL_INTERVAL_SECONDS=1").unwrap();
+    let child = dir.path().join("child");
+    std::fs::create_dir(&child).unwrap();
+    let credentials = [
+        ("TWITCH_CLIENT_ID", "test-client"),
+        ("TWITCH_CLIENT_SECRET", "test-secret"),
+    ];
+    assert!(
+        cli(&child, &["--check-config"], &credentials)
+            .status
+            .success()
+    );
+    let packaged = [
+        credentials[0],
+        credentials[1],
+        ("TWITCH_LIVE_ALERT_DESKTOP_EXE", "desktop.exe"),
+    ];
+    assert!(!cli(&child, &["--check-config"], &packaged).status.success());
+    assert!(!child.join("data").exists());
 }
