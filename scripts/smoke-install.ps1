@@ -13,8 +13,8 @@ $productKey = Join-Path $publisherKey 'Twitch Live Alert'
 $publisherExisted = Test-Path -LiteralPath $publisherKey
 $registered = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
     Where-Object { $_.DisplayName -eq 'Twitch Live Alert' }
-if ($registered -or (Test-Path -LiteralPath $productKey) -or (Get-Process -Name 'twitch-live-alert-desktop','twitch-live-alert' -ErrorAction SilentlyContinue)) {
-    throw 'Utilisez un compte de test sans installation ni processus Twitch Live Alert existant.'
+if ($registered -or (Test-Path -LiteralPath $productKey) -or (Get-Process -Name 'twitch-live-alert-desktop' -ErrorAction SilentlyContinue)) {
+    throw 'Utilisez un compte de test sans installation ni fenêtre Twitch Live Alert existante.'
 }
 $port = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $PortNumber)
 $port.ExclusiveAddressUse = $true
