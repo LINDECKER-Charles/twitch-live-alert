@@ -87,7 +87,10 @@ test('le navigateur peut préparer une surveillance sur une installation neuve e
       assert.equal(status.category, 'Bloodborne');
       assert.equal(status.language, 'fr');
       assert.equal(status.notify_existing_on_first_run, false);
-      for (const [path, mime] of [['/', 'text/html'], ['/style.css', 'text/css'], ['/app.js', 'javascript']]) {
+      for (const [path, mime] of [
+        ['/', 'text/html'], ['/style.css', 'text/css'], ['/app.js', 'javascript'],
+        ['/lists.js', 'javascript'], ['/category-picker.js', 'javascript'], ['/mark.svg', 'image/svg+xml'],
+      ]) {
         const response = await request(path);
         assert.equal(response.status, 200, path);
         assert.ok(response.headers.get('content-type').includes(mime));
@@ -97,11 +100,13 @@ test('le navigateur peut préparer une surveillance sur une installation neuve e
       assert.equal(history.status, 200);
       assert.deepEqual(await history.json(), { items: [], total: 0 });
       const preferences = {
-        category: 'Just Chatting', language: '', poll_interval_seconds: 75,
+        category: status.category, language: '', poll_interval_seconds: 75,
         notify_existing_on_first_run: false, start_with_windows: status.start_with_windows,
       };
       const invalid = await post('/api/settings', { ...preferences, poll_interval_seconds: 1 });
       assert.equal(invalid.status, 400);
+      const unverifiedCategory = await post('/api/settings', { ...preferences, category: 'Just Chatting' });
+      assert.equal(unverifiedCategory.status, 409);
       const saved = await post('/api/settings', preferences);
       assert.equal(saved.status, 200);
       assert.equal((await saved.json()).category, preferences.category);
@@ -110,7 +115,7 @@ test('le navigateur peut préparer une surveillance sur une installation neuve e
     });
     await t.test('relecture des choix après un arrêt propre', async (t) => {
       const { status, exited } = await start(t, directory);
-      assert.equal(status.category, 'Just Chatting');
+      assert.equal(status.category, 'Bloodborne');
       assert.equal(status.language, '');
       assert.equal(status.poll_interval_seconds, 75);
       assert.equal(status.notify_existing_on_first_run, false);

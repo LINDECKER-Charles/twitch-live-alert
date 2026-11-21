@@ -174,9 +174,10 @@ impl Control {
         }
         let previous = self.settings.borrow().clone();
         let connection = self.twitch.borrow().clone();
-        if preferences.filter.category != previous.preferences.filter.category
-            && let Some(mut twitch) = connection
-        {
+        if preferences.filter.category != previous.preferences.filter.category {
+            let mut twitch = connection.ok_or(ControlError::Unavailable(
+                "Connectez votre application Twitch pour valider la nouvelle catégorie.",
+            ))?;
             let category = twitch
                 .category(&preferences.filter.category)
                 .await

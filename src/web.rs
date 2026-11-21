@@ -29,15 +29,17 @@ pub(crate) fn router(control: Arc<Control>, port: u16) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/style.css", get(style))
-        .route("/app.js", get(script))
+        .route(
+            "/app.js",
+            get(|| async { script(include_str!("../web/app.js")) }),
+        )
         .route(
             "/lists.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../web/lists.js"),
-                )
-            }),
+            get(|| async { script(include_str!("../web/lists.js")) }),
+        )
+        .route(
+            "/category-picker.js",
+            get(|| async { script(include_str!("../web/category-picker.js")) }),
         )
         .route(
             "/mark.svg",
@@ -135,10 +137,10 @@ async fn style() -> impl IntoResponse {
     )
 }
 
-async fn script() -> impl IntoResponse {
+fn script(source: &'static str) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("../web/app.js"),
+        source,
     )
 }
 
