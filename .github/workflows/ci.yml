@@ -1,26 +1,87 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [dev, test, main]
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  rust:
+  service:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+    env:
+      RUSTUP_TOOLCHAIN: 1.99.1
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
       - name: Installer Rust
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
       - name: Vérifier le formatage
-        run: cargo +1.99.1 fmt --all -- --check
-      - name: Exécuter Clippy
-        run: cargo +1.99.1 clippy --locked --all-targets -- -D warnings
-      - name: Exécuter les tests
-        run: cargo +1.99.1 test --locked
+        run: cargo fmt --all -- --check
+      - name: Analyser le service
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Tester le service
+        run: cargo test --locked
+      - name: Construire le binaire pour le test HTTP
+        run: cargo build --locked
+      - name: Vérifier le premier lancement depuis le navigateur
+        run: node --test tests/smoke-dashboard.mjs
+
+  interface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Installer le navigateur de test
+        run: |
+          python -m pip install playwright==1.60.0
+          python -m playwright install --with-deps chromium
+      - name: Tester les parcours et les tailles d’écran
+        run: python docs/design/verify_ui.py
+
+  windows-installer:
+    runs-on: windows-latest
+    env:
+      RUSTUP_TOOLCHAIN: 1.99.1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Installer Rust
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+      - name: Vérifier le formatage du bureau
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Construire le service, le bureau et l’installeur NSIS
+        shell: pwsh
+        run: ./scripts/build-desktop.ps1
+      - name: Analyser le bureau
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Tester le bureau
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Installer, ouvrir, rouvrir et désinstaller
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($installer.Count -ne 1) { throw "Un seul installeur Windows est attendu." }
+          ./scripts/smoke-install.ps1 -Installer $installer[0].FullName
+      - name: Conserver l’installeur Windows
+        uses: actions/upload-artifact@v7
+        with:
+          name: Twitch-Live-Alert-Windows-x64-${{ github.sha }}
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
