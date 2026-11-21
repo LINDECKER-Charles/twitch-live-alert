@@ -4,10 +4,10 @@
 | --- | --- |
 | Détecter de nouveaux directs | **Directs** indique l’état Twitch, la fraîcheur du relevé, les filtres et les chaînes. Vérifier maintenant demande un relevé ponctuel. La pause et la reprise s’appliquent immédiatement. |
 | Retrouver une alerte | **Journal** recherche le nom de chaîne ou le titre dans tout l’historique local. Les pages contiennent 50 résultats au plus. Effacer retire le terme de recherche. |
-| Définir le périmètre | **Réglages** associe une catégorie Twitch à une langue ou à toutes les langues. Les suggestions aident à retrouver le nom exact de la catégorie quand Twitch est configuré. |
+| Définir le périmètre | **Réglages** associe une catégorie Twitch à une langue ou à toutes les langues. La recherche du catalogue affiche jusqu’à huit suggestions. La connexion Twitch est nécessaire pour changer la catégorie. La langue et les autres réglages restent modifiables dès le premier lancement. |
 | Choisir le comportement | Le champ numérique règle l’intervalle de 15 à 3 600 secondes. Deux cases indépendantes règlent le premier relevé de chaque nouveau filtre et le démarrage Windows. Enregistrer applique le formulaire. Envoyer un test sollicite Windows et restitue le résultat du service. |
 | Connecter une application | **Connexion Twitch** ouvre la console développeur et reçoit les deux identifiants. Les champs sont vidés après succès et en quittant cette destination. Une saisie refusée peut être corrigée sur place. |
-| Ouvrir une diffusion | Le nom de chaîne renvoie vers son adresse Twitch. Une icône signale la sortie de l’application. |
+| Ouvrir une diffusion | Le nom de chaîne renvoie vers son adresse Twitch. Une icône signale la sortie de l’application. La rangée indique l’audience et l’heure locale du début du direct si Twitch la fournit. La date complète est disponible au survol de l’heure. |
 
 Le libellé **Service local** indique si la console reçoit une réponse du processus sur le PC. **Surveillance active**, **Surveillance en pause** et **Surveillance dégradée** décrivent la détection des directs. **Notification** désigne une alerte Windows enregistrée dans le journal. La réception d’une commande de vérification et le résultat de ce relevé sont affichés séparément.
 

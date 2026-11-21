@@ -21,15 +21,16 @@ SAMPLE_TIME = datetime(2026, 11, 21, 19, 42, 16, tzinfo=timezone.utc)
 ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/category-picker.js": ("category-picker.js", "text/javascript; charset=utf-8"),
     "/lists.js": ("lists.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/mark.svg": ("mark.svg", "image/svg+xml"),
 }
 
 
-def sample_channel(index, name, title, viewers):
+def sample_channel(index, name, title, viewers, started_at="2026-11-21T18:02:00Z"):
     return dict(id=str(index), user_name=name, title=title, viewer_count=viewers,
-                started_at="2026-11-21T18:02:00Z", url="https://www.twitch.tv/" + name.lower())
+                started_at=started_at, url="https://www.twitch.tv/" + name.lower())
 
 
 class Fixture:
@@ -37,8 +38,8 @@ class Fixture:
         now = int(SAMPLE_TIME.timestamp())
         self.streams = [
             sample_channel(11, "AtelierDuSonge", "Retour à Yharnam · Chasse aux trophées", 124),
-            sample_channel(12, "LanternePourpre", "Première exploration des calices", 37),
-            sample_channel(13, "LeVeilleur", "La nuit de la chasse continue", 18),
+            sample_channel(12, "LanternePourpre", "Première exploration des calices", 37, "2026-11-21T17:38:00Z"),
+            sample_channel(13, "LeVeilleur", "La nuit de la chasse continue", 18, "2026-11-21T19:17:00Z"),
         ]
         self.history = [
             dict(stream_id=str(i), user_name=channel["user_name"], title=channel["title"],
@@ -52,6 +53,10 @@ class Fixture:
                            last_error=None, notifications_available=True, live_streams=[], notifications=[])
         self.offline = False
         self.reject_credentials = False
+        self.catalogue = ["Bloodborne", "Just Chatting", "ELDEN RING", "ELDEN RING NIGHTREIGN",
+                          "Elden: Path of the Forgotten"] + ["Catégorie test " + str(i) for i in range(12)]
+        self.fail_categories = False
+        self.held_category = None
         self.fail_history = False
         self.fail_test = False
         self.received = []
@@ -91,6 +96,15 @@ class Fixture:
             elif endpoint == "settings":
                 assert set(body) == {"category", "language", "poll_interval_seconds",
                                      "notify_existing_on_first_run", "start_with_windows"}
+                if not self.status["configured"] and body["category"] != self.status["category"]:
+                    route.fulfill(status=409, json={"message": "Connectez Twitch pour changer la catégorie."})
+                    return
+                if self.status["configured"] and body["category"] != self.status["category"]:
+                    names = {name.casefold(): name for name in self.catalogue}
+                    if body["category"].casefold() not in names:
+                        route.fulfill(status=400, json={"message": "Cette catégorie est introuvable. Choisissez son nom exact sur Twitch."})
+                        return
+                    body["category"] = names[body["category"].casefold()]
                 self.status.update(body)
             elif endpoint == "test-notification":
                 route.fulfill(status=503 if self.fail_test else 200, json={"message":
@@ -105,7 +119,13 @@ class Fixture:
         elif endpoint == "status":
             route.fulfill(json=self.status)
         elif endpoint == "categories":
-            route.fulfill(json={"items": [{"id": "1", "name": "Just Chatting"}]})
+            term = parse_qs(url.query)["q"][0].casefold()
+            if term == "attente":
+                self.held_category = route
+            elif self.fail_categories:
+                route.fulfill(status=503, json={"message": "Recherche Twitch indisponible."})
+            else:
+                route.fulfill(json={"items": [{"id": str(i), "name": name} for i, name in enumerate(self.catalogue) if term in name.casefold()]})
         elif endpoint == "history":
             if self.fail_history:
                 route.fulfill(status=503, json={"message": "Historique temporairement indisponible."})
@@ -134,10 +154,97 @@ def no_overflow(page):
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), page.url
 
 
+def category_picker(page, fixture, options):
+    field = page.get_by_role("combobox", name="Catégorie Twitch")
+    results = page.get_by_role("listbox", name="Suggestions du catalogue Twitch")
+    feedback = page.locator("#category-feedback")
+    view(page, "reglages")
+    saved_count = fixture.received.count("settings")
+
+    with page.expect_request(lambda r: "/api/categories?q=Attente" in r.url):
+        field.fill("Attente")
+    expect(feedback).to_contain_text("Recherche de « Attente »")
+    fixture.held_category.fulfill(json={"items": []})
+    expect(feedback).to_contain_text("Aucune catégorie trouvée")
+    field.press("Escape")
+    expect(field).to_have_value("Attente")
+    expect(field).to_have_attribute("aria-expanded", "false")
+    expect(field).to_be_focused()
+
+    fixture.fail_categories = True
+    field.fill("Just")
+    expect(feedback).to_contain_text("Recherche Twitch indisponible")
+    fixture.fail_categories = False
+    field.press("Escape")
+    page.locator("#category-toggle").click()
+    expect(results.get_by_role("option", name="Just Chatting")).to_be_visible()
+
+    with page.expect_request(lambda r: "/api/categories?q=Attente" in r.url):
+        field.fill("Attente")
+    field.fill("test")
+    expect(results.get_by_role("option")).to_have_count(8)
+    fixture.held_category.fulfill(json={"items": [{"id": "late", "name": "Ancien résultat"}]})
+    expect(results.get_by_role("option", name="Ancien résultat")).to_have_count(0)
+    expect(feedback).to_contain_text("8 premiers résultats")
+    field.fill("Elden")
+    expect(results.get_by_role("option")).to_have_count(3)
+    field.press("ArrowDown")
+    expect(results.get_by_role("option", selected=True)).to_have_text("ELDEN RING")
+    expect(field).to_have_attribute("aria-activedescendant", "category-option-0")
+    snapshot(page, options.captures, "suggestions-categories")
+    if options.category_capture:
+        page.screenshot(path=str(options.category_capture), animations="disabled")
+    if options.axe:
+        page.evaluate(options.axe.read_text(encoding="utf-8"))
+        violations = page.evaluate("async () => (await axe.run(document.querySelector('.filter-card'))).violations.map(v => v.id)")
+        assert not violations, violations
+    field.press("ArrowDown")
+    field.press("ArrowUp")
+    expect(field).to_be_focused()
+    field.press("Tab")
+    expect(page.locator("#language")).to_be_focused()
+    expect(field).to_have_value("Elden")
+    expect(field).to_have_attribute("aria-expanded", "false")
+    field.focus()
+    field.press("ArrowUp")
+    expect(results.get_by_role("option", selected=True)).to_have_text("Elden: Path of the Forgotten")
+    field.press("ArrowDown")
+    field.press("Enter")
+    expect(field).to_have_value("ELDEN RING")
+    expect(field).to_have_attribute("aria-expanded", "false")
+    expect(field).to_be_focused()
+    assert fixture.status["category"] == "Bloodborne" and fixture.received.count("settings") == saved_count
+    expect(page.locator("#category-current")).to_contain_text("Bloodborne")
+
+    field.fill("Introuvable QA")
+    page.locator("#save-settings").click()
+    expect(page.locator("#settings-feedback")).to_contain_text("introuvable")
+    expect(field).to_have_value("Introuvable QA")
+    expect(page.locator("#category-current")).to_contain_text("Bloodborne")
+    assert fixture.status["category"] == "Bloodborne"
+
+    field.fill("Elden")
+    expect(results.get_by_role("option")).to_have_count(3)
+    viewport = page.viewport_size
+    page.set_viewport_size({"width": 390, "height": 844})
+    no_overflow(page)
+    bounds = page.locator("#category-popup").bounding_box()
+    language = page.locator("#language").bounding_box()
+    assert bounds["y"] + bounds["height"] <= language["y"]
+    snapshot(page, options.captures, "mobile-suggestions-categories")
+    results.get_by_role("option", name="ELDEN RING NIGHTREIGN", exact=True).tap()
+    expect(field).to_have_value("ELDEN RING NIGHTREIGN")
+    expect(field).to_be_focused()
+    page.set_viewport_size(viewport)
+    field.fill("Just")
+    results.get_by_role("option", name="Just Chatting").click()
+    expect(field).to_have_value("Just Chatting")
+
+
 def run(browser, options):
     with options.manifest.open("rb") as manifest:
         fixture = Fixture(tomllib.load(manifest)["package"]["version"])
-    context = browser.new_context(viewport={"width": 1280, "height": 860}, locale="fr-FR", timezone_id="Europe/Paris")
+    context = browser.new_context(viewport={"width": 1280, "height": 860}, locale="fr-FR", timezone_id="Europe/Paris", has_touch=True)
     context.route("**/*", fixture.handle)
     page = context.new_page()
     page.clock.set_fixed_time(SAMPLE_TIME)
@@ -147,6 +254,22 @@ def run(browser, options):
     expect(page.locator("#monitor-state")).to_have_text("Twitch à configurer")
     snapshot(page, options.captures, "premier-lancement")
     expect(page.locator("#check-now")).to_be_hidden()
+
+    view(page, "reglages")
+    expect(page.locator("#category-connect")).to_be_visible()
+    expect(page.locator("#category-toggle")).to_be_disabled()
+    expect(page.locator("#category")).to_have_js_property("readOnly", True)
+    expect(page.locator("#category-popup")).to_be_hidden()
+    page.locator("#language").select_option("en")
+    page.locator("#save-settings").click()
+    expect(page.locator("#settings-feedback")).to_have_text("Réglages enregistrés.")
+    assert fixture.status["language"] == "en" and fixture.status["category"] == "Bloodborne"
+    page.locator("#language").select_option("fr")
+    page.locator("#save-settings").click()
+    expect(page.locator("#settings-feedback")).to_have_text("Réglages enregistrés.")
+    page.locator("#category-connect").click()
+    expect(page.locator("#title-connexion")).to_be_visible()
+    view(page, "directs")
 
     # Primary onboarding by keyboard, including the focus destination.
     page.locator("#setup-link").focus()
@@ -169,10 +292,7 @@ def run(browser, options):
     expect(page.locator("#client-id")).to_have_value("")
     snapshot(page, options.captures, "connexion")
 
-    view(page, "reglages")
-    page.locator("#category").fill("Just")
-    expect(page.locator("#category-options option")).to_have_attribute("value", "Just Chatting")
-    page.locator("#category").fill("Just Chatting")
+    category_picker(page, fixture, options)
     page.locator("#language").select_option("")
     page.locator("#poll-interval").fill("42")
     page.locator("#notify-first").focus()
@@ -197,6 +317,9 @@ def run(browser, options):
     expect(page.locator("#stream-list > li")).to_have_count(3)
     expect(page.locator("#recent-list > li")).to_have_count(3)
     expect(page.locator("#stream-list a").first).to_have_attribute("target", "_blank")
+    expect(page.locator("#stream-list time").first).to_have_text("Début 19:02")
+    expect(page.locator("#stream-list time").first).to_have_attribute("datetime", "2026-11-21T18:02:00.000Z")
+    expect(page.locator("#stream-list time").first).to_have_attribute("title", "Début du direct le 21/11/2026 19:02")
     snapshot(page, options.captures, "directs")
     if options.readme:
         viewport = page.viewport_size
@@ -251,11 +374,21 @@ def run(browser, options):
     expect(page.locator("#offline")).to_be_visible()
     expect(page.locator("#stream-list > li")).to_have_count(3)
     expect(page.locator("#check-now")).to_be_disabled()
+    view(page, "reglages")
+    expect(page.locator("#category-help")).to_contain_text("hors connexion")
+    expect(page.locator("#category")).to_be_disabled()
+    view(page, "directs")
     fixture.offline = False
     page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
     expect(page.locator("#offline")).to_be_hidden()
     expect(page.locator("#check-now")).to_be_enabled()
 
+    fixture.status["live_streams"] = [sample_channel(71, "SansDate", "Heure inconnue", 5, None),
+                                      sample_channel(72, "DateInvalide", "Heure illisible", 4, "invalide")]
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    expect(page.locator("#stream-list > li")).to_have_count(2)
+    expect(page.locator("#stream-list time")).to_have_count(0)
+    expect(page.locator("#stream-list .stream-meta").first).to_contain_text("5 spectateurs")
     fixture.status["live_streams"] = [sample_channel(i, "CanalTest" + str(i), "Direct fictif", 1) for i in range(120)]
     page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
     expect(page.locator("#stream-count")).to_have_text("120")
@@ -287,6 +420,7 @@ if __name__ == "__main__":
     parser.add_argument("--channel", help="Installed browser channel, for example msedge")
     parser.add_argument("--captures", type=Path, help="Screenshot directory (optional)")
     parser.add_argument("--manifest", default=ROOT / "Cargo.toml", type=Path, help="Manifest providing the version shown in the fixture")
+    parser.add_argument("--category-capture", type=Path, help="Settings screenshot with visible category suggestions")
     parser.add_argument("--readme", type=Path, help="Presentation screenshot path (optional)")
     parser.add_argument("--axe", type=Path, help="Local axe.min.js to run additional accessibility checks")
     args = parser.parse_args()

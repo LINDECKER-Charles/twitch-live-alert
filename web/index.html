@@ -80,8 +80,28 @@
       <section data-page="reglages" aria-labelledby="title-reglages" hidden>
         <header class="page-head"><div><h1 id="title-reglages" tabindex="-1">Réglages</h1><p>Choisissez les directs à surveiller et la façon de recevoir les alertes.</p></div></header>
         <form id="settings-form"><fieldset id="settings-fields" disabled>
-          <section class="panel form-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-filter"/></svg>Filtres de surveillance</h2></header><div class="form-grid">
-            <div class="field"><label for="category">Catégorie Twitch</label><input id="category" type="text" maxlength="200" placeholder="Ex. Bloodborne" required autocomplete="off" list="category-options" aria-describedby="category-help category-feedback"><datalist id="category-options"></datalist><small id="category-help">Saisissez le nom exact de la catégorie.</small><small id="category-feedback" role="status"></small></div>
+          <section class="panel form-card filter-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-filter"/></svg>Filtres de surveillance</h2></header><div class="form-grid">
+            <div class="field category-field">
+              <label for="category">Catégorie Twitch</label>
+              <div class="category-picker" id="category-picker">
+                <div class="category-control">
+                  <svg aria-hidden="true" class="icon"><use href="#i-search"/></svg>
+                  <input id="category" type="text" maxlength="200" placeholder="Rechercher une catégorie…" required autocomplete="off" spellcheck="false"
+                    role="combobox" aria-autocomplete="list" aria-controls="category-options" aria-expanded="false" aria-describedby="category-help category-current">
+                  <button id="category-toggle" type="button" tabindex="-1" aria-label="Afficher les suggestions de catégories" aria-controls="category-options" aria-expanded="false" disabled>
+                    <svg aria-hidden="true" class="icon"><use href="#i-chevron"/></svg>
+                  </button>
+                </div>
+                <div class="category-popup" id="category-popup" hidden>
+                  <p id="category-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+                  <ul id="category-options" role="listbox" aria-label="Suggestions du catalogue Twitch"></ul>
+                  <div class="category-keys" id="category-keys" aria-hidden="true" hidden><span><kbd>↑</kbd><kbd>↓</kbd> Parcourir</span><span><kbd>Entrée</kbd> Choisir</span></div>
+                </div>
+              </div>
+              <small id="category-help">Chargement de la configuration…</small>
+              <a class="text-link" id="category-connect" href="#connexion" hidden>Configurer la connexion Twitch <svg aria-hidden="true" class="icon"><use href="#i-arrow"/></svg></a>
+              <small id="category-current"></small>
+            </div>
             <div class="field"><label for="language">Langue des directs</label><select id="language" aria-describedby="language-help"><option value="">Toutes les langues</option></select><small id="language-help">Langue indiquée par la chaîne sur Twitch.</small></div>
           </div></section>
           <section class="panel form-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-clock"/></svg>Fonctionnement</h2></header>
