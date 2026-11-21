@@ -1,7 +1,7 @@
 use crate::{
     notification::Notifier,
     store::Store,
-    twitch::{Stream, Twitch},
+    twitch::{Stream, StreamFilter, Twitch},
 };
 use anyhow::Result;
 use tracing::{info, warn};
@@ -11,6 +11,7 @@ pub struct Watcher<N: Notifier> {
     pub notifier: N,
     pub store: Store,
     pub notify_existing: bool,
+    pub filter: StreamFilter,
     pub last_streams: Vec<Stream>,
 }
 
@@ -30,19 +31,23 @@ impl<N: Notifier> Watcher<N> {
         let streams = tokio::select! {
             biased;
             _ = shutdown.changed() => return Ok(0),
-            streams = self.twitch.french_bloodborne_streams() => streams?,
+            streams = self.twitch.streams(&self.filter) => streams?,
         };
         if *shutdown.borrow() {
             return Ok(0);
         }
         self.last_streams = streams.clone();
-        self.store.initialize(&streams, self.notify_existing)?;
+        self.store
+            .initialize(&self.filter, &streams, self.notify_existing)?;
         let mut sent = 0;
         for stream in &streams {
+            // Native toast delivery may finish synchronously. Give the controller a
+            // chance to cancel between alerts even when the whole page is new.
+            tokio::task::yield_now().await;
             if *shutdown.borrow() {
                 break;
             }
-            if self.store.contains(&stream.id)? {
+            if self.store.contains(&stream.id, &self.filter)? {
                 continue;
             }
             if let Err(error) = self.notifier.notify(stream).await {
@@ -56,7 +61,7 @@ impl<N: Notifier> Watcher<N> {
         info!(
             live_count = streams.len(),
             alerts_sent = sent,
-            "Vérification Bloodborne français terminée"
+            "Vérification des directs terminée"
         );
         Ok(sent)
     }

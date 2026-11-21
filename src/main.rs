@@ -1,4 +1,8 @@
-use alert_bloodborne_fr_live::{
+use anyhow::{Context, Result};
+use clap::Parser;
+use tracing::{error, info};
+use tracing_subscriber::EnvFilter;
+use twitch_live_alert::{
     config::{Config, Mode},
     http,
     notification::DesktopNotifier,
@@ -7,17 +11,13 @@ use alert_bloodborne_fr_live::{
     twitch::Twitch,
     watcher::Watcher,
 };
-use anyhow::{Context, Result};
-use clap::Parser;
-use tracing::{error, info};
-use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(
     version,
-    about = "Notifications Windows pour tous les lives Twitch Bloodborne déclarés en français"
+    about = "Notifications Windows pour les directs Twitch de la catégorie et de la langue sélectionnées"
 )]
-#[command(group(clap::ArgGroup::new("mode").args(["once", "dry_run", "test_notification", "check_config", "no_web"]).multiple(false)))]
+#[command(group(clap::ArgGroup::new("mode").args(["once", "dry_run", "test_notification", "check_config", "no_web", "import_credentials"]).multiple(false)))]
 struct Args {
     /// Exécuter un seul cycle de surveillance puis quitter
     #[arg(long)]
@@ -31,6 +31,12 @@ struct Args {
     /// Valider la configuration sans réseau ni création de base
     #[arg(long)]
     check_config: bool,
+    /// Importer les identifiants Twitch de l'environnement ou du .env local dans ce profil Windows
+    #[arg(long, value_name = "PROFIL")]
+    import_credentials: Option<std::path::PathBuf>,
+    /// Port HTTP de l'interface locale
+    #[arg(long, default_value_t = 37219, value_parser = clap::value_parser!(u16).range(1..))]
+    port: u16,
     /// Détacher la console pour un lancement discret sous Windows
     #[arg(long)]
     background: bool,
@@ -48,7 +54,11 @@ async fn main() -> std::process::ExitCode {
             let _ = windows::Win32::System::Console::FreeConsole();
         }
     }
-    let dotenv = load_dotenv();
+    let dotenv = if std::env::var_os("TWITCH_LIVE_ALERT_DESKTOP_EXE").is_some() {
+        Ok(())
+    } else {
+        load_dotenv()
+    };
     // Keep third-party HTTP tracing from exposing credentials.
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"))
@@ -72,8 +82,15 @@ async fn main() -> std::process::ExitCode {
 }
 
 async fn run(args: Args, dotenv: Result<()>) -> Result<()> {
+    if let Some(profile) = args.import_credentials {
+        dotenv?;
+        runtime::import_credentials(&profile).await?;
+        info!("Identifiants Twitch validés et enregistrés dans le profil Windows");
+        return Ok(());
+    }
     if !(args.check_config || args.test_notification || args.dry_run || args.once || args.no_web) {
         return runtime::serve(
+            args.port,
             dotenv.and_then(|()| Config::from_env(Mode::Watch)),
             shutdown_signal(),
         )
@@ -100,10 +117,11 @@ async fn run(args: Args, dotenv: Result<()>) -> Result<()> {
     if args.no_web {
         return runtime::watch_in_terminal(config, shutdown_signal()).await;
     }
+    let (filter, notify_existing) = runtime::stored_selection(&config);
     let twitch = Twitch::new(http::client()?, config.client_id, config.client_secret);
     if args.dry_run {
         let mut twitch = twitch;
-        let streams = twitch.french_bloodborne_streams().await?;
+        let streams = twitch.streams(&filter).await?;
         for stream in &streams {
             println!(
                 "{} — {} — {}",
@@ -122,7 +140,8 @@ async fn run(args: Args, dotenv: Result<()>) -> Result<()> {
         twitch,
         notifier: DesktopNotifier::new()?,
         store: Store::open(&config.database_path)?,
-        notify_existing: config.notify_existing,
+        notify_existing,
+        filter,
         last_streams: Vec::new(),
     };
     watcher.cycle().await?;
@@ -148,8 +167,8 @@ async fn shutdown_signal() -> Result<()> {
 }
 
 fn load_dotenv() -> Result<()> {
-    match dotenvy::dotenv() {
-        Ok(_) => {}
+    match dotenvy::from_path(".env") {
+        Ok(()) => {}
         Err(dotenvy::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => {
             anyhow::bail!("Impossible de charger .env : fichier illisible ou syntaxe invalide")

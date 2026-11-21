@@ -1,3 +1,4 @@
+use crate::credentials::{CREDENTIALS_FILE, Credentials};
 use anyhow::{Context, Result, bail};
 use std::{env, path::PathBuf, time::Duration};
 
@@ -19,7 +20,18 @@ pub enum Mode {
 
 impl Config {
     pub fn from_env(mode: Mode) -> Result<Self> {
-        Self::from_lookup(mode, |key| env::var(key).ok())
+        let saved = if matches!(mode, Mode::TestNotification) {
+            None
+        } else {
+            Credentials::load(std::path::Path::new(CREDENTIALS_FILE))?
+        };
+        let packaged = env::var_os("TWITCH_LIVE_ALERT_DESKTOP_EXE").is_some();
+        Self::from_lookup(mode, |key| match (key, &saved) {
+            ("TWITCH_CLIENT_ID", Some(pair)) => Some(pair.client_id.clone()),
+            ("TWITCH_CLIENT_SECRET", Some(pair)) => Some(pair.client_secret.clone()),
+            ("TWITCH_CLIENT_ID" | "TWITCH_CLIENT_SECRET", None) if packaged => None,
+            _ => env::var(key).ok(),
+        })
     }
 
     fn from_lookup(mode: Mode, get: impl Fn(&str) -> Option<String>) -> Result<Self> {
@@ -48,8 +60,8 @@ impl Config {
             bail!("POLL_INTERVAL_SECONDS doit être compris entre 15 et 3600");
         }
         let notify_existing = match get("NOTIFY_EXISTING_ON_FIRST_RUN").as_deref() {
-            None | Some("true") => true,
-            Some("false") => false,
+            Some("true") => true,
+            None | Some("false") => false,
             _ => bail!("NOTIFY_EXISTING_ON_FIRST_RUN doit valoir true ou false"),
         };
         let database_path =

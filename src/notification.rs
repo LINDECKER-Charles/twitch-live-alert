@@ -2,7 +2,7 @@ use crate::twitch::Stream;
 use anyhow::Result;
 use std::{fmt, future::Future};
 
-pub const APP_ID: &str = "BloodborneFRLive.Desktop";
+pub const APP_ID: &str = "TwitchLiveAlert.Desktop";
 
 pub trait Notifier {
     fn notify(&self, stream: &Stream) -> impl Future<Output = Result<()>>;
@@ -45,9 +45,9 @@ impl DesktopNotifier {
     pub fn test_notification(&self) -> Result<()> {
         self.show(
             "test",
-            "Notifications Bloodborne activées",
-            "Les alertes des lives en français apparaîtront ici. Cliquez pour ouvrir Twitch.",
-            "https://www.twitch.tv/directory/category/bloodborne",
+            "Notifications Twitch Live Alert activées",
+            "Les alertes des chaînes que vous surveillez apparaîtront ici.",
+            "https://www.twitch.tv/directory",
         )
     }
 
@@ -60,7 +60,10 @@ impl DesktopNotifier {
         #[cfg(not(windows))]
         {
             let _ = (tag, xml);
-            anyhow::bail!("Les notifications locales nécessitent Windows 10 ou 11")
+            Err(
+                NotificationError("Les notifications locales nécessitent Windows 10 ou 11".into())
+                    .into(),
+            )
         }
     }
 }
@@ -70,7 +73,7 @@ impl Notifier for DesktopNotifier {
         stream.validate()?;
         self.show(
             &stream.id,
-            &format!("{} joue à Bloodborne en français", stream.user_name),
+            &format!("{} est en direct", stream.user_name),
             &stream.title,
             &stream.url(),
         )
@@ -82,7 +85,7 @@ pub(crate) fn toast_xml(title: &str, body: &str, url: &str) -> String {
     let body = escape_xml(body, 600);
     let url = escape_xml(url, 2048);
     format!(
-        r#"<toast activationType="protocol" launch="{url}" duration="long"><visual><binding template="ToastGeneric"><text>{title}</text><text>{body}</text><text placement="attribution">Bloodborne · Français</text></binding></visual><actions><action content="Voir sur Twitch" activationType="protocol" arguments="{url}"/></actions><audio src="ms-winsoundevent:Notification.Default"/></toast>"#
+        r#"<toast activationType="protocol" launch="{url}" duration="long"><visual><binding template="ToastGeneric"><text>{title}</text><text>{body}</text><text placement="attribution">Twitch Live Alert</text></binding></visual><actions><action content="Voir sur Twitch" activationType="protocol" arguments="{url}"/></actions><audio src="ms-winsoundevent:Notification.Default"/></toast>"#
     )
 }
 
@@ -124,7 +127,7 @@ mod native {
         let key = windows_registry::CURRENT_USER
             .create(format!(r"Software\Classes\AppUserModelId\{APP_ID}"))
             .map_err(|e| failure("enregistrement de l’identité", e))?;
-        key.set_string("DisplayName", "Bloodborne FR Live")
+        key.set_string("DisplayName", "Twitch Live Alert")
             .map_err(|e| failure("enregistrement du nom", e))?;
         // Protocol-only activation is handled by Windows, including after this app exits.
         key.set_string("CustomActivator", "{1D0E707F-2F09-49DC-BF84-E75B83951F5C}")
@@ -153,7 +156,7 @@ mod native {
         let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_ID))
             .map_err(|e| failure("création de l’émetteur", e))?;
         if !enabled(&notifier)? {
-            return Err(NotificationError("autorisations désactivées. Activez Bloodborne FR Live dans Paramètres > Système > Notifications".into()).into());
+            return Err(NotificationError("autorisations désactivées. Activez Twitch Live Alert dans Paramètres > Système > Notifications".into()).into());
         }
         let document = XmlDocument::new().map_err(|e| failure("création du document XML", e))?;
         document
@@ -166,7 +169,7 @@ mod native {
             .SetTag(&HSTRING::from(notification_tag(tag)))
             .map_err(|e| failure("affectation du tag", e))?;
         toast
-            .SetGroup(&HSTRING::from("bloodborne-fr"))
+            .SetGroup(&HSTRING::from("twitch-live-alert"))
             .map_err(|e| failure("affectation du groupe", e))?;
         notifier.Show(&toast).map_err(|e| failure("affichage", e))?;
         Ok(())
@@ -195,7 +198,7 @@ mod desktop_tests {
         // A previous run can leave the same test alert in Action Center.
         let removed = history.RemoveGroupedTagWithId(
             &HSTRING::from(native::notification_tag("test")),
-            &HSTRING::from("bloodborne-fr"),
+            &HSTRING::from("twitch-live-alert"),
             &app_id,
         );
         if let Err(error) = removed {
@@ -218,7 +221,7 @@ mod desktop_tests {
                     .GetXml()
                     .unwrap()
                     .to_string()
-                    .contains("Notifications Bloodborne activées")
+                    .contains("Notifications Twitch Live Alert activées")
             });
             if found {
                 return;
