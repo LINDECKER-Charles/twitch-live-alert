@@ -1,3 +1,4 @@
+import { createCategoryPicker } from "./category-picker.js";
 import { createJournal, dateLabel, emptyState, renderRows, text } from "./lists.js";
 
 const id = name => document.getElementById(name);
@@ -14,10 +15,9 @@ let revision = 0;
 let page = "";
 const streamPageSize = 50;
 let visibleStreams = streamPageSize;
-let categoryTimer = null;
-let categoryTicket = 0;
 let requestingStatus = false;
 const journal = createJournal(request, id);
+const categoryPicker = createCategoryPicker(id, request, settingsEdited);
 
 function langName(code) {
   if (!code) return "Toutes les langues";
@@ -41,7 +41,7 @@ function say(element, message, tone = "") {
 
 function currentSettings() {
   return {
-    category: id("category").value.trim(),
+    category: status && !status.configured ? status.category : id("category").value.trim(),
     language: id("language").value,
     poll_interval_seconds: id("poll-interval").valueAsNumber,
     notify_existing_on_first_run: id("notify-first").checked,
@@ -151,12 +151,15 @@ function render() {
   const configured = status?.configured;
   say(id("credentials-state"), !connected ? "État inconnu" : configured ? "Configurée" : "À configurer",
     !connected ? "" : configured ? "good" : "warn");
+  categoryPicker.setContext(connected, Boolean(status?.configured), status?.category);
   renderStreams();
   controls();
 }
 
-async function request(path, body) {
+async function request(path, body, signal) {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
   const timeout = setTimeout(() => controller.abort(), body === undefined ? 14000 : 30000);
   const options = { cache: "no-store", signal: controller.signal, credentials: "same-origin", redirect: "error" };
   if (body !== undefined) {
@@ -176,10 +179,10 @@ async function request(path, body) {
       throw new Error(message);
     }
     return result;
-  } finally { clearTimeout(timeout); }
+  } finally { clearTimeout(timeout); signal?.removeEventListener("abort", abort); }
 }
 
-function applyStatus(data, sync = !changed()) {
+function applyStatus(data, sync = !changed() && (!status || id("category").value === status.category)) {
   if (data?.app_id !== "twitch-live-alert" || !Array.isArray(data.live_streams)) throw Error("Réponse inattendue du service local.");
   if (data.category !== status?.category || data.language !== status?.language) visibleStreams = streamPageSize;
   status = data;
@@ -233,6 +236,7 @@ function route(focus = true) {
   const next = Object.hasOwn(labels, hash) ? hash : "directs";
   if (page === next) return;
   if (page === "connexion") id("credentials-form").reset();
+  if (page === "reglages") categoryPicker.close();
   page = next;
   for (const section of document.querySelectorAll("[data-page]")) section.hidden = section.dataset.page !== page;
   for (const link of document.querySelectorAll("[data-nav]")) {
@@ -249,28 +253,12 @@ function route(focus = true) {
   if (page === "journal") void journal.load();
 }
 
-async function suggestCategories(query, ticket) {
-  try {
-    const data = await request("categories?" + new URLSearchParams({ q: query }));
-    if (ticket !== categoryTicket) return;
-    const options = (data?.items || []).map(item => new Option(item.name, item.name));
-    id("category-options").replaceChildren(...options);
-    say(id("category-feedback"), options.length ? "" : "Aucune suggestion. Vous pouvez saisir le nom exact.");
-  } catch {
-    if (ticket === categoryTicket) say(id("category-feedback"), "Suggestions indisponibles. Vous pouvez saisir le nom exact.", "warn");
-  }
+function settingsEdited() {
+  say(id("settings-feedback"), "");
+  controls();
 }
 
-id("category").addEventListener("input", () => {
-  const value = id("category").value.trim();
-  const ticket = ++categoryTicket;
-  clearTimeout(categoryTimer);
-  id("category-options").replaceChildren();
-  say(id("category-feedback"), "");
-  if (value && status?.configured && connected) categoryTimer = setTimeout(() => void suggestCategories(value, ticket), 280);
-});
-
-id("settings-form").addEventListener("input", () => { say(id("settings-feedback"), ""); controls(); });
+id("settings-form").addEventListener("input", settingsEdited);
 id("settings-form").addEventListener("submit", event => {
   event.preventDefault();
   if (!changed()) return;

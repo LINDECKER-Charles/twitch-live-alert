@@ -2,6 +2,7 @@ const svgNamespace = "http://www.w3.org/2000/svg";
 const counts = new Intl.NumberFormat("fr-FR");
 const dateFormat = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const clockFormat = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const startTimeFormat = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
 const previewSnapshots = new WeakMap();
 
 export function icon(name) {
@@ -93,9 +94,23 @@ function createEntry(data, historical) {
     time.textContent = dateLabel(data.recorded_at);
     detail.append(time);
   } else {
-    detail.append(icon("eye"), document.createTextNode(counts.format(data.viewer_count)));
-    detail.setAttribute("aria-label", counts.format(data.viewer_count) + (data.viewer_count === 1 ? " spectateur" : " spectateurs"));
-    detail.title = detail.getAttribute("aria-label");
+    detail.classList.add("stream-meta");
+    const start = data.started_at ? new Date(data.started_at) : null;
+    if (start && Number.isFinite(start.getTime())) {
+      const time = document.createElement("time");
+      time.dateTime = start.toISOString();
+      time.title = "Début du direct le " + dateFormat.format(start);
+      time.setAttribute("aria-label", time.title);
+      time.textContent = "Début " + startTimeFormat.format(start);
+      detail.append(time);
+    }
+    const audience = document.createElement("span");
+    const unit = document.createElement("span");
+    unit.className = "sr-only";
+    unit.textContent = data.viewer_count === 1 ? " spectateur" : " spectateurs";
+    audience.title = counts.format(data.viewer_count) + unit.textContent;
+    audience.append(icon("eye"), document.createTextNode(counts.format(data.viewer_count)), unit);
+    detail.append(audience);
   }
   row.append(marker, copy, detail);
   return row;
