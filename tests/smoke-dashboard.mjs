@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
-const executable = fileURLToPath(new URL(
+const executable = process.env.TLA_SMOKE_BINARY || fileURLToPath(new URL(
   '../target/debug/' + (process.platform === 'win32' ? 'twitch-live-alert.exe' : 'twitch-live-alert'),
   import.meta.url,
 ));
@@ -86,6 +86,7 @@ test('le navigateur peut préparer une surveillance sur une installation neuve e
       assert.equal(status.running, false);
       assert.equal(status.category, 'Bloodborne');
       assert.equal(status.language, 'fr');
+      assert.equal(status.notify_existing_on_first_run, false);
       for (const [path, mime] of [['/', 'text/html'], ['/style.css', 'text/css'], ['/app.js', 'javascript']]) {
         const response = await request(path);
         assert.equal(response.status, 200, path);
