@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -11,7 +12,16 @@ const executable = fileURLToPath(new URL(
   '../target/debug/' + (process.platform === 'win32' ? 'twitch-live-alert.exe' : 'twitch-live-alert'),
   import.meta.url,
 ));
-const origin = 'http://127.0.0.1:37219';
+// Keep the installed dashboard running while this test starts its own process.
+const reservation = createServer();
+const port = await new Promise((resolve, reject) => {
+  reservation.once('error', reject);
+  reservation.listen(0, '127.0.0.1', () => {
+    const { port } = reservation.address();
+    reservation.close((error) => error ? reject(error) : resolve(port));
+  });
+});
+const origin = 'http://127.0.0.1:' + port;
 const localHeaders = {
   Origin: origin,
   'Content-Type': 'application/json',
@@ -32,7 +42,9 @@ async function start(t, directory) {
     'TWITCH_LIVE_ALERT_DESKTOP_EXE', 'POLL_INTERVAL_SECONDS', 'NOTIFY_EXISTING_ON_FIRST_RUN']) {
     delete env[key];
   }
-  const service = spawn(executable, [], { cwd: directory, env, stdio: 'ignore', windowsHide: true });
+  const service = spawn(executable, ['--port', String(port)], {
+    cwd: directory, env, stdio: 'ignore', windowsHide: true,
+  });
   const exited = new Promise((resolve, reject) => {
     service.once('error', reject);
     service.once('exit', (code, signal) => resolve({ code, signal }));
@@ -48,7 +60,7 @@ async function start(t, directory) {
     if (response) {
       const status = await response.json();
       assert.equal(status.app_id, 'twitch-live-alert');
-      assert.equal(status.process_id, service.pid, 'Le port 37219 appartient à une autre instance.');
+      assert.equal(status.process_id, service.pid, 'Le port de test appartient à une autre instance.');
       return { status, exited };
     }
     if (await Promise.race([stopped, delay(100, false)])) {
