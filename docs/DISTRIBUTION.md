@@ -10,7 +10,7 @@ Utilisez un hôte Windows avec Rust MSVC, les outils C++ de Visual Studio et le 
 
 Le script compile `twitch-live-alert.exe` en profil release, le copie dans le répertoire de préparation Tauri avec le suffixe de la cible Rust, puis fabrique le paquet NSIS. Les deux binaires se trouvent côte à côte après installation. Rust, Node et le dépôt sont nécessaires uniquement à la construction. L’installeur télécharge le runtime Microsoft Edge WebView2 si Windows en a besoin. [Documentation Windows de Tauri](https://v2.tauri.app/distribute/windows-installer/)
 
-L’installeur x64 se trouve dans `src-tauri/target/release/bundle/nsis/` avec la configuration Cargo par défaut. La CI conserve le fichier `*-setup.exe` dans l’artefact `Twitch-Live-Alert-Windows-x64-<commit>`. Les promotions `dev → test → main` et le téléchargement des artefacts restent indépendants des GitHub Releases. [Parcours de contribution](../CONTRIBUTING.md)
+L’installeur x64 se trouve dans `src-tauri/target/release/bundle/nsis/` avec la configuration Cargo par défaut. Dans un dépôt public, la CI utilise les runners standard GitHub et teste le paquet dans l’espace temporaire du runner. Pour conserver l’installeur, construisez-le localement. [Parcours de contribution](../CONTRIBUTING.md)
 
 ## Installer et utiliser
 
