@@ -1,28 +1,14 @@
-# Surveillance Twitch
+# Console de surveillance Twitch
 
-**Route** `/` · **Sources** `web/` · **Surface** locale sur le PC qui exécute la surveillance.
+La console s’adresse à la personne qui suit des directs Twitch sur son PC. Le geste courant consiste à vérifier la surveillance puis ouvrir une chaîne. La connexion Twitch et les préférences sont configurées à l’installation ou lors d’un changement de périmètre. Le nombre de chaînes simultanées dépend de la catégorie et de la langue choisies. Le journal se parcourt par pages de 50 notifications. Les directs s’affichent par tranches de 50 chaînes, avec le total du relevé et un bouton pour poursuivre.
 
-Le joueur consulte les directs, vérifie la réception d’une notification Windows et modifie les paramètres à l’installation ou selon ses besoins. Le nombre de chaînes simultanées reste inconnu avant une première mesure et les listes acceptent plusieurs lignes sans limite visuelle arbitraire. L’interface utilise le thème sombre du projet.
+| Destination | Tâche principale | Choix du conteneur |
+| --- | --- | --- |
+| Directs | Lire l’état et ouvrir une chaîne | Bandeau d’état avec la dernière et la prochaine vérification, liste puis aperçu des trois dernières notifications. |
+| Journal | Retrouver une notification | Recherche sur l’historique complet et pagination sur le serveur local. |
+| Réglages | Modifier les filtres et le comportement | Formulaire groupé avec enregistrement explicite et conservation du brouillon au rafraîchissement. |
+| Connexion Twitch | Renseigner ou remplacer les identifiants | Formulaire dédié, secret masqué, état de configuration fourni par le service. |
 
-| Zone | Choix |
-|---|---|
-| Surveillance | Bloc d’état en haut de page, avec la dernière vérification, la prochaine et des commandes immédiates. |
-| Directs | Liste de résultats, avec un lien par chaîne valide. |
-| Réglages | Formulaire intégré à la page. Le champ numérique reçoit un intervalle en secondes. Deux cases représentent les options indépendantes. Le bouton Enregistrer applique les changements ensemble. |
-| Notifications récentes | Historique en bas de page, avec les mêmes libellés de chaîne et des dates. |
+Décision du 21 novembre 2026. L’ancien tableau réunissait l’ensemble des réglages et des résultats sur une page. L’ajout de la recherche d’historique, des filtres et de la connexion Twitch justifie quatre destinations avec URL et retour navigateur. Les gestes immédiats de vérification, de pause et de reprise restent sur Directs. Un lien de la console conduit au formulaire quand Twitch doit être configuré.
 
-| Situation | Réponse |
-|---|---|
-| Chargement initial | État de connexion et commandes indisponibles. |
-| Service local inaccessible | Message de connexion et nouvelle tentative automatique, avec conservation de la dernière vue. |
-| Twitch à configurer | Indication dans l’état et dans la liste des directs. |
-| Surveillance en pause | Commande Reprendre et dernière liste datée si disponible. |
-| Liste vide | Message selon la disponibilité et la fraîcheur des données. Aucun filtre sur cette page. |
-| Échec d’un geste | Retour visible près des commandes ou du formulaire. |
-| Enregistrement | Le rafraîchissement préserve les brouillons. Le bouton signale la progression puis la confirmation. |
-| 390 px | Une colonne et des commandes de 44 px minimum. |
-| Clavier | Ordre du document, focus visible, contrôles natifs et retours annoncés. |
-
-Décision du 20 novembre 2026. La page combine l’état et les réglages dans une seule vue pour permettre de vérifier l’effet d’une action sans naviguer.
-
-Retouche du 20 novembre 2026 : les deux cases gardent leur fonctionnement natif et la validation par Enregistrer. Leur présentation utilise un carré de 24 px aux angles adoucis, une coche contrastée sur fond laiton et un focus visible. Le mode de couleurs forcées reprend le contrôle du navigateur. Rendu contrôlé à 1280 px et 390 px ; sélection par Espace et navigation par Tab vérifiées dans l’application locale.
+Sur petit écran, les quatre destinations restent visibles et le contenu se lit sur une colonne. Au clavier, la navigation mène au titre de la destination choisie. L’application conserve le dernier relevé pendant une interruption et indique sa fraîcheur. Un premier chargement et une liste vide après vérification ont chacun un message distinct. Les retours d’échec restent à côté du geste concerné.
