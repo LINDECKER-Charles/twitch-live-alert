@@ -25,3 +25,7 @@ target/
 *.sqlite3-wal
 *.lock
 !Cargo.lock
+
+# Desktop build staging
+/src-tauri/binaries/
+/src-tauri/gen/
