@@ -4,7 +4,7 @@ use crate::{
     tests::{FakeNotifier, twitch_server},
 };
 use chrono::{TimeZone, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use serde_json::json;
 use wiremock::{Mock, ResponseTemplate, matchers::path};
 
@@ -80,7 +80,7 @@ fn v020_migrates_thirteen_history_rows_filter_pause_dedup_and_preserves_profile_
         PRAGMA user_version=3;")?;
     for i in 1..=13 {
         old.execute("INSERT INTO deliveries VALUES(?1,'sent',NULL,?2,'Chaîne',?3,'https://www.twitch.tv/chaine')",
-            params![format!("stream-{i}"),1000+i,format!("Titre {i}")])?;
+            rusqlite::params![format!("stream-{i}"),1000+i,format!("Titre {i}")])?;
     }
     drop(old);
     let settings = Settings::load(&settings_path, Settings::defaults(None));

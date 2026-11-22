@@ -1,5 +1,4 @@
 use super::{
-    settings::Stored,
     template::{self, Context},
     *,
 };
@@ -235,7 +234,10 @@ async fn dpapi_settings_never_expose_auth_and_bind_it_to_server() -> Result<()> 
         assert!(!text.contains("\"username\""));
     }
     assert_eq!(
-        Stored::load(&service.file())?.auth()?.unwrap().username,
+        settings::Stored::load(&service.file())?
+            .auth()?
+            .unwrap()
+            .username,
         "synthetic-auth-user"
     );
     config["port"] = 587.into();
