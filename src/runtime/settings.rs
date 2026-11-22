@@ -1,4 +1,8 @@
-use crate::{config::Config, twitch::StreamFilter};
+use crate::{
+    config::Config,
+    rules::{MAX_RULES, Rule},
+    twitch::StreamFilter,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fs, io::Write, path::Path, time::Duration};
@@ -19,6 +23,10 @@ pub(crate) struct Preferences {
 pub(super) struct Settings {
     pub(super) preferences: Preferences,
     pub(super) enabled: bool,
+    #[serde(default)]
+    pub(super) rules: Option<Vec<Rule>>,
+    #[serde(default)]
+    pub(super) disconnected: bool,
 }
 
 impl Settings {
@@ -31,6 +39,8 @@ impl Settings {
                 filter: StreamFilter::default(),
             },
             enabled: true,
+            rules: None,
+            disconnected: false,
         }
     }
 
@@ -51,9 +61,25 @@ impl Settings {
         }
     }
 
+    pub(super) fn rules(&self) -> Vec<Rule> {
+        self.rules
+            .clone()
+            .unwrap_or_else(|| vec![Rule::legacy(self.preferences.filter.clone())])
+    }
+
+    pub(super) fn active_count(&self) -> usize {
+        self.rules
+            .as_deref()
+            .map_or(1, |rules| rules.iter().filter(|rule| rule.enabled).count())
+    }
+
     fn valid(&self) -> bool {
         (15..=3600).contains(&self.preferences.poll_interval_seconds)
             && self.preferences.filter.valid()
+            && self
+                .rules
+                .as_ref()
+                .is_none_or(|rules| rules.len() <= MAX_RULES && rules.iter().all(Rule::validate))
     }
 
     pub(super) fn save(&self, path: &Path) -> Result<()> {
@@ -69,5 +95,33 @@ impl Settings {
 
     pub(super) fn interval(&self) -> Duration {
         Duration::from_secs(self.preferences.poll_interval_seconds)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PreferencesUpdate {
+    pub poll_interval_seconds: u64,
+    pub notify_existing_on_first_run: bool,
+    pub start_with_windows: bool,
+    pub category: Option<String>,
+    pub language: Option<String>,
+}
+
+impl PreferencesUpdate {
+    pub(super) fn merge(self, previous: &Preferences) -> Preferences {
+        Preferences {
+            poll_interval_seconds: self.poll_interval_seconds,
+            notify_existing_on_first_run: self.notify_existing_on_first_run,
+            start_with_windows: self.start_with_windows,
+            filter: StreamFilter {
+                category: self
+                    .category
+                    .unwrap_or_else(|| previous.filter.category.clone()),
+                language: self
+                    .language
+                    .unwrap_or_else(|| previous.filter.language.clone()),
+            },
+        }
     }
 }

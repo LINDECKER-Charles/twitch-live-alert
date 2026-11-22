@@ -4,12 +4,8 @@ use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use twitch_live_alert::{
     config::{Config, Mode},
-    http,
     notification::DesktopNotifier,
     runtime,
-    store::Store,
-    twitch::Twitch,
-    watcher::Watcher,
 };
 
 #[derive(Parser)]
@@ -117,35 +113,7 @@ async fn run(args: Args, dotenv: Result<()>) -> Result<()> {
     if args.no_web {
         return runtime::watch_in_terminal(config, shutdown_signal()).await;
     }
-    let (filter, notify_existing) = runtime::stored_selection(&config);
-    let twitch = Twitch::new(http::client()?, config.client_id, config.client_secret);
-    if args.dry_run {
-        let mut twitch = twitch;
-        let streams = twitch.streams(&filter).await?;
-        for stream in &streams {
-            println!(
-                "{} — {} — {}",
-                stream.user_name,
-                stream.url(),
-                stream.title.replace(['\n', '\r'], " ")
-            );
-        }
-        info!(
-            live_count = streams.len(),
-            "Simulation terminée, aucun envoi ni écriture d'état"
-        );
-        return Ok(());
-    }
-    let mut watcher = Watcher {
-        twitch,
-        notifier: DesktopNotifier::new()?,
-        store: Store::open(&config.database_path)?,
-        notify_existing,
-        filter,
-        last_streams: Vec::new(),
-    };
-    watcher.cycle().await?;
-    Ok(())
+    runtime::check_once(config, args.dry_run).await
 }
 
 async fn shutdown_signal() -> Result<()> {

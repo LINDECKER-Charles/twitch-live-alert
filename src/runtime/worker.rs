@@ -1,54 +1,45 @@
-use super::{Control, LiveStream, NOTIFICATION_ERROR};
-use crate::{
-    http, notification::NotificationError, store::Store, twitch::StreamFilter, watcher::Watcher,
-};
+use super::{Control, NOTIFICATION_ERROR, poll::Poller};
+use crate::{http, notification::Notifier, store::Store};
 use anyhow::Result;
 use std::time::Duration;
 use tokio::{
     sync::{mpsc, watch},
     time::{Instant, sleep_until},
 };
-use tracing::error;
+use tracing::warn;
 
 pub(super) async fn run_worker(
-    store: Store,
-    notifier: impl crate::notification::Notifier,
+    mut store: Store,
+    notifier: impl Notifier,
     control: &Control,
     mut checks: mpsc::Receiver<()>,
 ) -> Result<()> {
     let mut settings = control.settings.subscribe();
     let mut shutdown = control.shutdown.subscribe();
     let mut credentials = control.twitch.subscribe();
-    let twitch = tokio::select! {
-        biased;
-        _ = shutdown.wait_for(|stopped| *stopped) => return Ok(()),
-        result = credentials.wait_for(Option::is_some) => result?.clone().expect("configured"),
-    };
-    let mut watcher = Watcher {
-        twitch,
-        store,
-        notifier,
-        filter: StreamFilter::default(),
-        notify_existing: true,
-        last_streams: Vec::new(),
-    };
-    let mut last_finished = None;
+    let mut last_finished: Option<(Instant, chrono::DateTime<chrono::Utc>)> = None;
     let mut retry_until: Option<Instant> = None;
     let mut failures = 0u32;
+    let mut previous_rules = Vec::new();
+    let mut previous_session = None;
     while !*shutdown.borrow() {
         let current = settings.borrow_and_update().clone();
-        let latest = credentials.borrow_and_update().clone().expect("configured");
-        if !watcher.twitch.same_session(&latest) || watcher.filter != current.preferences.filter {
-            // A new filter or account gets an immediate first check. The shared Twitch
-            // session independently enforces any outstanding provider rate limit.
-            watcher.twitch = latest;
-            watcher.filter = current.preferences.filter.clone();
-            watcher.last_streams.clear();
+        let rules = current.rules();
+        let session = credentials.borrow_and_update().clone();
+        if session
+            .as_ref()
+            .zip(previous_session.as_ref())
+            .is_none_or(|(a, b)| !a.same_session(b))
+            || previous_rules != rules
+        {
             last_finished = None;
             retry_until = None;
             failures = 0;
+            previous_session = session.clone();
+            previous_rules.clone_from(&rules);
         }
-        if !current.enabled {
+        let Some(mut twitch) = session.filter(|_| current.enabled && current.active_count() > 0)
+        else {
             last_finished = None;
             while checks.try_recv().is_ok() {}
             tokio::select! {
@@ -56,99 +47,79 @@ pub(super) async fn run_worker(
                 _ = credentials.changed() => continue,
                 _ = settings.changed() => continue,
             }
-        }
+        };
         let now = Instant::now();
         let due = last_finished
-            .map_or(now, |last: Instant| last + current.interval())
+            .map_or(now, |(last, wall)| {
+                last + super::poll::next_delay(&rules, wall, current.interval())
+            })
             .max(retry_until.unwrap_or(now));
-        {
-            let mut status = control.lock_status();
-            if status.running {
-                status.next_check_at = Some(
-                    http::unix_seconds()
-                        .saturating_add(due.saturating_duration_since(now).as_secs()),
-                );
-            }
-        }
+        control.lock_status().next_check_at =
+            Some(http::unix_seconds().saturating_add(due.saturating_duration_since(now).as_secs()));
         tokio::select! {
             biased;
             _ = shutdown.changed() => break,
-            _ = settings.changed() => continue,
             _ = credentials.changed() => continue,
-            _ = sleep_until(due) => { let _ = checks.try_recv(); },
-            _ = async {
-                if let Some(deadline) = retry_until {
-                    sleep_until(deadline).await;
-                }
-                checks.recv().await
-            } => {}
+            _ = settings.changed() => continue,
+            _ = sleep_until(due) => {let _ = checks.try_recv();},
+            _ = async { if let Some(deadline) = retry_until { sleep_until(deadline).await; } checks.recv().await } => {}
         }
         control.lock_status().next_check_at = None;
-        watcher.notify_existing = current.preferences.notify_existing_on_first_run;
-        let (cancel, mut cancel_receiver) = watch::channel(false);
-        let (result, cancelled) = {
-            let cycle = watcher.cycle_with_shutdown(&mut cancel_receiver);
+        let (cancel, mut cancel_rx) = watch::channel(false);
+        let mut poller = Poller {
+            store: &mut store,
+            notifier: &notifier,
+            twitch: &mut twitch,
+            notify_existing: current.preferences.notify_existing_on_first_run,
+        };
+        let (report, cancelled) = {
+            let cycle = poller.poll(&rules, &mut cancel_rx);
             tokio::pin!(cycle);
             tokio::select! {
                 biased;
-                _ = shutdown.wait_for(|stop| *stop) => {
-                    cancel.send_replace(true);
-                    (cycle.await, true)
-                }
-                _ = credentials.changed() => {
-                    cancel.send_replace(true);
-                    (cycle.await, true)
-                }
-                _ = settings.wait_for(|value| !value.enabled || value.preferences.filter != current.preferences.filter) => {
-                    cancel.send_replace(true);
-                    (cycle.await, true)
-                }
-                result = &mut cycle => (result, false),
+                _ = shutdown.wait_for(|s|*s) => {cancel.send_replace(true);(cycle.await?,true)},
+                _ = credentials.changed() => {cancel.send_replace(true);(cycle.await?,true)},
+                _ = settings.wait_for(|s|!s.enabled || s.rules()!=rules) => {cancel.send_replace(true);(cycle.await?,true)},
+                result = &mut cycle => (result?,false),
             }
         };
-        let last_error = match result {
-            Ok(_) => {
-                if !cancelled {
-                    failures = 0;
-                    retry_until = None;
-                }
-                None
-            }
-            Err(error) => {
-                // Stop if an alert could have been delivered without a durable record.
-                let api_error = error.downcast_ref::<http::ApiError>();
-                if api_error.is_none() && error.downcast_ref::<NotificationError>().is_none() {
-                    return Err(error);
-                }
-                failures = failures.saturating_add(1);
-                let delay = http::retry_delay(&error, failures, current.interval());
-                retry_until = Instant::now()
-                    .checked_add(delay)
-                    .or_else(|| Some(Instant::now() + Duration::from_secs(3600)));
-                error!(retry_seconds = delay.as_secs_f64(), "{error:#}");
-                Some(api_error.map_or_else(|| NOTIFICATION_ERROR.to_owned(), ToString::to_string))
-            }
-        };
-        let notifications = watcher.store.recent_history()?;
+        let history = store.recent_history()?;
         let mut status = control.lock_status();
-        status.notifications = notifications;
+        status.notifications = history;
         if cancelled
             || !status.running
-            || status.preferences.filter != current.preferences.filter
+            || control.settings.borrow().rules() != rules
             || !control
                 .twitch
                 .borrow()
                 .as_ref()
-                .is_some_and(|t| t.same_session(&watcher.twitch))
+                .is_some_and(|s| s.same_session(&twitch))
         {
             last_finished = None;
             continue;
         }
-        status.retry_not_before = retry_until;
-        status.live_streams = watcher.last_streams.iter().map(LiveStream::from).collect();
+        let error = report.warning.map(|e| {
+            failures = failures.saturating_add(1);
+            let delay = http::retry_delay(&e, failures, current.interval());
+            retry_until = Instant::now()
+                .checked_add(delay)
+                .or_else(|| Some(Instant::now() + Duration::from_secs(3600)));
+            warn!(
+                retry_seconds = delay.as_secs(),
+                "Une vérification ou une notification sera réessayée"
+            );
+            e.downcast_ref::<http::ApiError>()
+                .map_or_else(|| NOTIFICATION_ERROR.to_owned(), ToString::to_string)
+        });
+        if error.is_none() {
+            failures = 0;
+            retry_until = None;
+        }
+        status.last_error = error;
+        status.live_streams = report.live;
         status.last_checked_at = Some(http::unix_seconds());
-        status.last_error = last_error;
-        last_finished = Some(Instant::now());
+        status.retry_not_before = retry_until;
+        last_finished = Some((Instant::now(), chrono::Utc::now()));
     }
     Ok(())
 }

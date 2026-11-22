@@ -1,8 +1,20 @@
+mod connection;
+mod rules;
 mod settings;
+pub(crate) use connection::ConnectionState;
+#[cfg(test)]
+mod rule_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+use crate::twitch::StreamFilter;
+mod poll;
+mod services;
 mod worker;
-pub(crate) use settings::Preferences;
+pub use services::check_once;
+use services::run_services;
+use settings::Preferences;
+pub(crate) use settings::PreferencesUpdate;
 use settings::Settings;
 use worker::run_worker;
 
@@ -13,7 +25,7 @@ use crate::{
     notification::DesktopNotifier,
     startup::{set_startup, startup_enabled},
     store::{Delivery, History, Store},
-    twitch::{Category, Stream, StreamFilter, Twitch},
+    twitch::{Category, Stream, Twitch},
     web,
 };
 use anyhow::{Context, Result};
@@ -47,6 +59,8 @@ pub(crate) struct Status {
     process_id: u32,
     app_version: &'static str,
     pub running: bool,
+    pub enabled: bool,
+    pub active_rule_count: usize,
     pub configured: bool,
     #[serde(flatten)]
     preferences: Preferences,
@@ -64,6 +78,8 @@ pub(crate) struct Status {
 
 #[derive(Clone, Serialize)]
 struct LiveStream {
+    rule_id: String,
+    rule_name: String,
     id: String,
     user_name: String,
     title: String,
@@ -72,9 +88,11 @@ struct LiveStream {
     started_at: String,
 }
 
-impl From<&Stream> for LiveStream {
-    fn from(stream: &Stream) -> Self {
+impl LiveStream {
+    fn new(rule: &crate::rules::Rule, stream: &Stream) -> Self {
         Self {
+            rule_id: rule.id.clone(),
+            rule_name: rule.name.clone(),
             id: stream.id.clone(),
             user_name: stream.user_name.clone(),
             title: stream.title.clone(),
@@ -94,6 +112,8 @@ pub(crate) enum ControlError {
 
 pub(crate) struct Control {
     status: Mutex<Status>,
+    connection: Mutex<ConnectionState>,
+    pub(crate) mail: crate::mail::MailService,
     settings: watch::Sender<Settings>,
     settings_path: PathBuf,
     database_path: Option<PathBuf>,
@@ -110,6 +130,7 @@ impl Control {
         twitch: Option<Twitch>,
         database_path: Option<PathBuf>,
     ) -> (Arc<Self>, mpsc::Receiver<()>) {
+        let twitch = twitch.filter(|_| !settings.disconnected);
         let configured = twitch.is_some();
         let worker_available = database_path.is_some();
         let (twitch, _) = watch::channel(twitch);
@@ -117,11 +138,23 @@ impl Control {
         let (shutdown, _) = watch::channel(false);
         let (checks, check_receiver) = mpsc::channel(1);
         let control = Self {
+            connection: Mutex::new(ConnectionState::new(configured)),
+            mail: crate::mail::MailService::new(
+                settings_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("data"))
+                    .to_path_buf(),
+            ),
             status: Mutex::new(Status {
                 app_id: "twitch-live-alert",
                 process_id: std::process::id(),
                 app_version: env!("CARGO_PKG_VERSION"),
-                running: configured && worker_available && settings.enabled,
+                running: configured
+                    && worker_available
+                    && settings.enabled
+                    && settings.active_count() > 0,
+                enabled: settings.enabled,
+                active_rule_count: settings.active_count(),
                 configured,
                 preferences: settings.preferences,
                 last_checked_at: None,
@@ -155,11 +188,10 @@ impl Control {
         status
     }
 
-    pub async fn change_preferences(
-        &self,
-        mut preferences: Preferences,
-    ) -> Result<(), ControlError> {
+    pub async fn change_preferences(&self, update: PreferencesUpdate) -> Result<(), ControlError> {
         let _guard = self.changes.lock().await;
+        let previous = self.settings.borrow().clone();
+        let mut preferences = update.merge(&previous.preferences);
         preferences.filter.category = preferences.filter.category.trim().to_owned();
         preferences.filter.language = preferences.filter.language.trim().to_ascii_lowercase();
         if !preferences.filter.valid() {
@@ -172,7 +204,6 @@ impl Control {
                 "L'intervalle doit être compris entre 15 et 3600 secondes.",
             ));
         }
-        let previous = self.settings.borrow().clone();
         let connection = self.twitch.borrow().clone();
         if preferences.filter.category != previous.preferences.filter.category {
             let mut twitch = connection.ok_or(ControlError::Unavailable(
@@ -184,10 +215,15 @@ impl Control {
                 .map_err(category_error)?;
             preferences.filter.category = category.name;
         }
-        let settings = Settings {
-            preferences: preferences.clone(),
-            ..previous
-        };
+        let mut settings = previous;
+        if preferences.filter != settings.preferences.filter
+            && let Some(rules) = &mut settings.rules
+            && let Some(legacy) = rules.iter_mut().find(|r| r.id == crate::rules::LEGACY_ID)
+        {
+            legacy.filter = preferences.filter.clone();
+            legacy.box_art_url.clear();
+        }
+        settings.preferences = preferences.clone();
         let existing_startup = startup_enabled().unwrap_or(false);
         if existing_startup != preferences.start_with_windows {
             set_startup(preferences.start_with_windows)
@@ -230,7 +266,7 @@ impl Control {
 
     fn apply(&self, settings: Settings) {
         let mut status = self.lock_status();
-        if status.preferences.filter != settings.preferences.filter {
+        if self.settings.borrow().rules() != settings.rules() {
             status.live_streams.clear();
             status.retry_not_before = None;
             status.next_check_at = None;
@@ -240,9 +276,12 @@ impl Control {
             }
         }
         status.preferences = settings.preferences.clone();
+        status.enabled = settings.enabled;
+        status.active_rule_count = settings.active_count();
         status.running = status.configured
             && status.worker_available
             && settings.enabled
+            && status.active_rule_count > 0
             && !*self.shutdown.borrow();
         if !status.running {
             status.next_check_at = None;
@@ -268,30 +307,31 @@ impl Control {
         pair: Credentials,
         twitch: Twitch,
     ) -> Result<(), ControlError> {
-        twitch.validate_credentials().await.map_err(|e| {
-            if e.downcast_ref::<http::ApiError>()
-                .and_then(|a| a.status)
-                .is_some_and(|s| matches!(s.as_u16(), 400 | 401 | 403))
-            {
-                ControlError::Invalid(
-                    "Twitch a refusé ces identifiants. Vérifiez le Client ID et le Client Secret.",
-                )
-            } else {
-                ControlError::Unavailable(
-                    "Impossible de valider les identifiants auprès de Twitch. Réessayez plus tard.",
-                )
-            }
-        })?;
+        twitch
+            .validate_credentials()
+            .await
+            .map_err(connection::credential_error)?;
         pair.save(&self.settings_path.with_file_name("twitch.dpapi"))
             .map_err(|_| {
                 ControlError::Operation(
                     "Impossible de protéger les identifiants dans ce profil Windows.",
                 )
             })?;
+        let mut settings = self.settings.borrow().clone();
+        if settings.disconnected {
+            settings.disconnected = false;
+            settings
+                .save(&self.settings_path)
+                .map_err(|_| ControlError::Operation(SETTINGS_ERROR))?;
+            self.apply(settings);
+        }
+        *self.connection.lock().expect("connection lock") = ConnectionState::verified();
         let mut status = self.lock_status();
         status.configured = true;
-        status.running =
-            status.worker_available && self.settings.borrow().enabled && !*self.shutdown.borrow();
+        status.running = status.worker_available
+            && status.enabled
+            && status.active_rule_count > 0
+            && !*self.shutdown.borrow();
         status.retry_not_before = None;
         if status.worker_available {
             status.last_error = None;
@@ -401,7 +441,14 @@ pub async fn import_credentials(profile: &Path) -> Result<()> {
         pair.client_secret.clone(),
     );
     twitch.validate_credentials().await?;
-    pair.save(&profile.join(crate::credentials::CREDENTIALS_FILE))
+    pair.save(&profile.join(crate::credentials::CREDENTIALS_FILE))?;
+    let path = profile.join(SETTINGS_PATH);
+    let mut settings = Settings::load(&path, Settings::defaults(None));
+    if settings.disconnected {
+        settings.disconnected = false;
+        settings.save(&path)?;
+    }
+    Ok(())
 }
 
 pub async fn serve(
@@ -456,7 +503,7 @@ pub async fn serve(
     info!("Interface locale ouverte sur http://127.0.0.1:{port}");
     let worker = async {
         if let Some(store) = store
-            && let Err(error) = run_worker(store, DesktopNotifier, &control, receiver).await
+            && let Err(error) = run_services(store, &control, receiver).await
         {
             error!("{error:#}");
             control.fail_worker(STORAGE_ERROR);
@@ -509,12 +556,12 @@ pub async fn watch_in_terminal(
     let store = Store::open(&config.database_path)?;
     let twitch = Twitch::new(http::client()?, config.client_id, config.client_secret);
     let (control, receiver) = Control::new(
-        PathBuf::new(),
+        PathBuf::from(SETTINGS_PATH),
         settings,
         Some(twitch),
         Some(config.database_path),
     );
-    let worker = run_worker(store, DesktopNotifier, &control, receiver);
+    let worker = run_services(store, &control, receiver);
     tokio::pin!(worker, shutdown_signal);
     tokio::select! {
         result = &mut worker => result,
@@ -540,10 +587,4 @@ fn category_error(error: anyhow::Error) -> ControlError {
         }
     }
     ControlError::Unavailable("Impossible de consulter les catégories Twitch. Réessayez plus tard.")
-}
-
-pub fn stored_selection(config: &Config) -> (StreamFilter, bool) {
-    let preferences =
-        Settings::load(Path::new(SETTINGS_PATH), Settings::defaults(Some(config))).preferences;
-    (preferences.filter, preferences.notify_existing_on_first_run)
 }

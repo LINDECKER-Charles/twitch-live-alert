@@ -3,7 +3,7 @@ use anyhow::Result;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -11,7 +11,7 @@ use std::{
 const API: &str = "https://api.twitch.tv/helix";
 const OAUTH: &str = "https://id.twitch.tv/oauth2";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Stream {
     pub id: String,
     pub user_login: String,
@@ -23,6 +23,16 @@ pub struct Stream {
     pub title: String,
     pub started_at: String,
     pub viewer_count: u64,
+    #[serde(default)]
+    pub user_id: String,
+    #[serde(default)]
+    pub game_name: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub is_mature: Option<bool>,
+    #[serde(default)]
+    pub thumbnail_url: String,
 }
 
 impl Stream {
@@ -67,6 +77,8 @@ struct Pagination {
 pub(crate) struct Category {
     pub(crate) id: String,
     pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) box_art_url: String,
 }
 #[derive(Deserialize)]
 struct TokenResponse {
@@ -84,7 +96,7 @@ struct Token {
     validated_at: Option<Instant>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(default)]
 pub struct StreamFilter {
     pub category: String,
@@ -123,7 +135,6 @@ impl StreamFilter {
 #[derive(Clone)]
 pub struct Twitch {
     session: Arc<tokio::sync::Mutex<Session>>,
-    category: Option<Category>,
 }
 
 struct Session {
@@ -134,6 +145,8 @@ struct Session {
     oauth: String,
     token: Option<Token>,
     cooldown: Option<Instant>,
+    categories: HashMap<String, Category>,
+    request_times: std::collections::VecDeque<Instant>,
 }
 
 impl Twitch {
@@ -146,10 +159,11 @@ impl Twitch {
             oauth: OAUTH.into(),
             token: None,
             cooldown: None,
+            categories: HashMap::new(),
+            request_times: Default::default(),
         };
         Self {
             session: Arc::new(tokio::sync::Mutex::new(session)),
-            category: None,
         }
     }
 
@@ -166,6 +180,14 @@ impl Twitch {
 
     pub(crate) fn same_session(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.session, &other.session)
+    }
+
+    pub(crate) async fn verify(&self) -> Result<()> {
+        let mut session = self.session.lock().await;
+        if let Some(token) = session.token.as_mut() {
+            token.validated_at = None;
+        }
+        session.ensure_token().await
     }
 
     pub async fn validate_credentials(&self) -> Result<()> {
@@ -309,6 +331,21 @@ impl Session {
     ) -> Result<T> {
         for attempt in 0..2 {
             self.ensure_token().await?;
+            // Share the rolling budget across rules and category search. The session serializes requests.
+            const BUDGET: usize = 120;
+            const WINDOW: Duration = Duration::from_secs(60);
+            while self
+                .request_times
+                .front()
+                .is_some_and(|t| t.elapsed() >= WINDOW)
+            {
+                self.request_times.pop_front();
+            }
+            if self.request_times.len() >= BUDGET {
+                tokio::time::sleep(WINDOW.saturating_sub(self.request_times[0].elapsed())).await;
+                self.request_times.pop_front();
+            }
+            self.request_times.push_back(Instant::now());
             let response = self
                 .client
                 .get(format!("{}/{endpoint}", self.api))
@@ -345,16 +382,20 @@ impl Session {
 }
 
 impl Twitch {
+    pub(crate) fn cached_categories(&self) -> HashMap<String, Category> {
+        self.session
+            .try_lock()
+            .map(|s| s.categories.clone())
+            .unwrap_or_default()
+    }
+
     pub(crate) async fn category(&mut self, name: &str) -> Result<Category> {
-        if let Some(category) = &self.category
-            && category.name.eq_ignore_ascii_case(name)
-        {
+        let mut session = self.session.lock().await;
+        let key = name.to_lowercase();
+        if let Some(category) = session.categories.get(&key) {
             return Ok(category.clone());
         }
-        let page: Page<Category> = self
-            .session
-            .lock()
-            .await
+        let page: Page<Category> = session
             .get("games", &[("name".into(), name.into())])
             .await?;
         let category = page
@@ -362,7 +403,10 @@ impl Twitch {
             .into_iter()
             .find(|category| !category.id.is_empty() && category.name.eq_ignore_ascii_case(name))
             .ok_or_else(|| http::protocol("Twitch API", "catégorie introuvable"))?;
-        self.category = Some(category.clone());
+        if session.categories.len() >= 128 {
+            session.categories.clear();
+        }
+        session.categories.insert(key, category.clone());
         Ok(category)
     }
 

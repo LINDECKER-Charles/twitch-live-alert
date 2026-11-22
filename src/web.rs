@@ -1,14 +1,15 @@
 use crate::{
     credentials::Credentials,
     notification::DesktopNotifier,
-    runtime::{Control, Preferences, Status},
+    rules::Rule,
+    runtime::{ConnectionState, Control, PreferencesUpdate, Status},
     store::History,
     twitch::Category,
 };
 use axum::{
     Json, Router,
     extract::{
-        DefaultBodyLimit, Query, Request, State,
+        DefaultBodyLimit, Path, Query, Request, State,
         rejection::{JsonRejection, QueryRejection},
     },
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
@@ -23,24 +24,13 @@ use std::sync::Arc;
 const ADDRESS: &str = "127.0.0.1:37219";
 #[cfg(test)]
 const LOOPBACK_ALIAS: &str = "localhost:37219";
-const RESPONSE_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+const RESPONSE_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://static-cdn.jtvnw.net; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
 pub(crate) fn router(control: Arc<Control>, port: u16) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/style.css", get(style))
-        .route(
-            "/app.js",
-            get(|| async { script(include_str!("../web/app.js")) }),
-        )
-        .route(
-            "/lists.js",
-            get(|| async { script(include_str!("../web/lists.js")) }),
-        )
-        .route(
-            "/category-picker.js",
-            get(|| async { script(include_str!("../web/category-picker.js")) }),
-        )
+        .route("/{asset}", get(asset_script))
         .route(
             "/mark.svg",
             get(|| async {
@@ -52,6 +42,13 @@ pub(crate) fn router(control: Arc<Control>, port: u16) -> Router {
         )
         .route("/api/status", get(status))
         .route("/api/categories", get(categories))
+        .route("/api/rules", get(rules).post(upsert_rule))
+        .route("/api/rules/{id}/delete", post(delete_rule))
+        .route("/api/connection", get(connection))
+        .route("/api/connection/verify", post(verify))
+        .route("/api/connection/replace", post(replace))
+        .route("/api/connection/disconnect", post(disconnect))
+        .merge(control.mail.router())
         .route("/api/history", get(history))
         .route("/api/credentials", post(credentials))
         .route("/api/settings", post(settings))
@@ -60,7 +57,7 @@ pub(crate) fn router(control: Arc<Control>, port: u16) -> Router {
         .route("/api/test-notification", post(test_notification))
         .route("/api/shutdown", post(shutdown))
         .with_state(control)
-        .layer(DefaultBodyLimit::max(4096))
+        .layer(DefaultBodyLimit::max(32 * 1024))
         .layer(middleware::from_fn_with_state(port, protect_local))
 }
 
@@ -137,6 +134,15 @@ async fn style() -> impl IntoResponse {
     )
 }
 
+async fn asset_script(Path(name): Path<String>) -> Response {
+    match embedded_scripts(&name) {
+        Some(source) => script(source).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+include!(concat!(env!("OUT_DIR"), "/scripts.rs"));
+
 fn script(source: &'static str) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
@@ -208,9 +214,68 @@ async fn credentials(
     Ok(Json(control.status()))
 }
 
+#[derive(Serialize)]
+struct Rules {
+    rules: Vec<Rule>,
+}
+
+async fn rules(State(control): State<Arc<Control>>) -> Json<Rules> {
+    Json(Rules {
+        rules: control.display_rules(),
+    })
+}
+
+async fn upsert_rule(
+    State(control): State<Arc<Control>>,
+    body: Result<Json<Rule>, JsonRejection>,
+) -> Result<Json<Rules>, ApiError> {
+    Ok(Json(Rules {
+        rules: control.upsert_rule(read_body(body)?).await?,
+    }))
+}
+
+async fn delete_rule(
+    State(control): State<Arc<Control>>,
+    Path(id): Path<String>,
+    body: Result<Json<Empty>, JsonRejection>,
+) -> Result<Json<Rules>, ApiError> {
+    read_body(body)?;
+    Ok(Json(Rules {
+        rules: control.delete_rule(&id).await?,
+    }))
+}
+
+async fn connection(State(control): State<Arc<Control>>) -> Json<ConnectionState> {
+    Json(control.connection())
+}
+
+async fn verify(
+    State(control): State<Arc<Control>>,
+    body: Result<Json<Empty>, JsonRejection>,
+) -> Result<Json<ConnectionState>, ApiError> {
+    read_body(body)?;
+    Ok(Json(control.verify(true).await?))
+}
+
+async fn replace(
+    State(control): State<Arc<Control>>,
+    body: Result<Json<Credentials>, JsonRejection>,
+) -> Result<Json<ConnectionState>, ApiError> {
+    control.credentials(read_body(body)?).await?;
+    Ok(Json(control.connection()))
+}
+
+async fn disconnect(
+    State(control): State<Arc<Control>>,
+    body: Result<Json<Empty>, JsonRejection>,
+) -> Result<Json<ConnectionState>, ApiError> {
+    read_body(body)?;
+    Ok(Json(control.disconnect().await?))
+}
+
 async fn settings(
     State(control): State<Arc<Control>>,
-    body: Result<Json<Preferences>, JsonRejection>,
+    body: Result<Json<PreferencesUpdate>, JsonRejection>,
 ) -> Result<Json<Status>, ApiError> {
     control.change_preferences(read_body(body)?).await?;
     Ok(Json(control.status()))

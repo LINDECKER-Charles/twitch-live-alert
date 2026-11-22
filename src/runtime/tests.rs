@@ -15,6 +15,7 @@ fn persists_pause_and_replaces_settings_atomically() -> Result<()> {
             filter: StreamFilter::default(),
         },
         enabled: false,
+        ..defaults.clone()
     };
     paused.save(&settings_path)?;
     let reopened = Settings::load(&settings_path, defaults);
