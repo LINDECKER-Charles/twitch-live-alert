@@ -135,6 +135,7 @@ impl MailService {
     pub fn router<S: Clone + Send + Sync + 'static>(&self) -> Router<S> {
         Router::new()
             .route("/api/mail", get(settings).post(update))
+            .route("/api/mail/delivery", get(super::delivery::get))
             .route("/api/mail/preview", post(preview))
             .route("/api/mail/test", post(test))
             .with_state(self.clone())

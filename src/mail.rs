@@ -1,5 +1,6 @@
 //! Local SMTP settings, durable delivery and shared rule scheduling.
 mod api;
+mod delivery;
 mod outbox;
 mod settings;
 mod template;
@@ -61,6 +62,7 @@ pub struct MailService {
     #[cfg(test)]
     test_ca: Option<lettre::transport::smtp::client::Certificate>,
     profile: PathBuf,
+    database: Option<PathBuf>,
     changes: Arc<Mutex<()>>,
 }
 
@@ -70,8 +72,14 @@ impl MailService {
             #[cfg(test)]
             test_ca: None,
             profile: profile_dir,
+            database: None,
             changes: Arc::new(Mutex::new(())),
         }
+    }
+
+    pub fn with_database(mut self, path: Option<PathBuf>) -> Self {
+        self.database = path;
+        self
     }
 
     fn file(&self) -> PathBuf {
