@@ -63,7 +63,7 @@ impl DesktopNotifier {
     fn show(&self, tag: &str, title: &str, body: &str, url: &str) -> Result<()> {
         #[cfg(windows)]
         {
-            native::show(tag, title, body, url)
+            native::show(tag, title, body, url, false)
         }
         #[cfg(not(windows))]
         {
@@ -195,7 +195,7 @@ mod native {
             .is_ok_and(|notifier| enabled(&notifier).unwrap_or(false))
     }
 
-    pub fn show(tag: &str, title: &str, body: &str, url: &str) -> Result<()> {
+    pub fn show(tag: &str, title: &str, body: &str, url: &str, silent: bool) -> Result<()> {
         let logo_uri = register()?;
         let xml = toast_xml(title, body, url, logo_uri.as_str());
         let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_ID))
@@ -216,6 +216,11 @@ mod native {
         toast
             .SetGroup(&HSTRING::from("twitch-live-alert"))
             .map_err(|e| failure("affectation du groupe", e))?;
+        if silent {
+            toast
+                .SetSuppressPopup(true)
+                .map_err(|e| failure("notification silencieuse", e))?;
+        }
         notifier.Show(&toast).map_err(|e| failure("affichage", e))?;
         Ok(())
     }
@@ -260,47 +265,56 @@ mod desktop_tests {
     use windows::{UI::Notifications::ToastNotificationManager, core::HSTRING};
 
     #[test]
-    #[ignore = "requires an interactive Windows session and shows one real test notification"]
+    #[ignore = "requires Windows Notification Center in a logged-in user session"]
     fn notification_is_saved_in_windows_notification_center() {
-        let notifier = DesktopNotifier::new().unwrap();
         let app_id = HSTRING::from(APP_ID);
         let history = ToastNotificationManager::History().unwrap();
-        // A previous run can leave the same test alert in Action Center.
-        let removed = history.RemoveGroupedTagWithId(
-            &HSTRING::from(native::notification_tag("test")),
-            &HSTRING::from("twitch-live-alert"),
-            &app_id,
-        );
-        if let Err(error) = removed {
-            assert_eq!(
-                error.code(),
-                windows::Win32::Foundation::ERROR_NOT_FOUND.to_hresult()
-            );
-        }
-        assert!(DesktopNotifier::available());
-        notifier.test_notification().unwrap();
+        let tag = format!("logo-check-{}", std::process::id());
+        let windows_tag = HSTRING::from(native::notification_tag(&tag));
+        let group = HSTRING::from("twitch-live-alert");
+        let title = "Vérification silencieuse du logo";
+        native::show(
+            &tag,
+            title,
+            "Twitch Live Alert",
+            "https://www.twitch.tv/directory",
+            true,
+        )
+        .unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
+        let stored_logo = loop {
             let entries = history.GetHistoryWithId(&app_id).unwrap();
-            let found = (0..entries.Size().unwrap()).any(|i| {
-                entries
-                    .GetAt(i)
-                    .unwrap()
-                    .Content()
-                    .unwrap()
-                    .GetXml()
-                    .unwrap()
-                    .to_string()
-                    .contains("Notifications Twitch Live Alert activées")
-            });
-            if found {
-                return;
+            let mut uri = None;
+            for i in 0..entries.Size().unwrap() {
+                let toast = entries.GetAt(i).unwrap();
+                if toast.Tag().unwrap() == windows_tag && toast.Group().unwrap() == group {
+                    let xml = toast.Content().unwrap();
+                    uri = xml
+                        .SelectSingleNode(&HSTRING::from(
+                            "//image[@placement='appLogoOverride']/@src",
+                        ))
+                        .and_then(|node| node.InnerText())
+                        .ok();
+                    break;
+                }
             }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "Notification absente du centre Windows"
-            );
+            if uri.is_some() || std::time::Instant::now() >= deadline {
+                break uri;
+            }
             std::thread::sleep(std::time::Duration::from_millis(100));
-        }
+        };
+        history
+            .RemoveGroupedTagWithId(&windows_tag, &group, &app_id)
+            .unwrap();
+        let uri = reqwest::Url::parse(
+            &stored_logo
+                .expect("logo absent du centre de notifications")
+                .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(uri.to_file_path().unwrap()).unwrap(),
+            include_bytes!("notification/logo.png")
+        );
     }
 }
