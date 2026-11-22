@@ -52,4 +52,4 @@ From a source checkout, `cargo build --locked --release` creates `target/release
 
 The standalone CLI accepts `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `DATABASE_PATH`, `POLL_INTERVAL_SECONDS`, `NOTIFY_EXISTING_ON_FIRST_RUN` and `RUST_LOG` from its environment or local `.env`. The default database is `data/alerts.sqlite3`. [Example configuration](.env.example)
 
-[Build and distribute on Windows](docs/en/DISTRIBUTION.md) · [Contributor guide](docs/en/CONTRIBUTING.md) · [0.2.0 release notes](docs/releases/0.2.0.md) · [MIT license](LICENSE)
+[Build and distribute on Windows](docs/en/DISTRIBUTION.md) · [Contributor guide](docs/en/CONTRIBUTING.md) · [Dashboard layout and browser checks](docs/en/INTERFACE.md) · [0.2.0 release notes](docs/releases/0.2.0.md) · [MIT license](LICENSE)

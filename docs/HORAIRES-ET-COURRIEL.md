@@ -47,4 +47,3 @@ Les champs **Objet** et **Corps** sont en texte brut. Insérez une valeur entre 
 | `{{rule}}` | Nom de la règle ayant détecté le direct. |
 
 Pour l’objet, essayez `[{{rule}}] {{user_name}} est en direct`. Pour le corps, essayez `{{title}} — {{category}} ({{language}}) · {{viewer_count}} spectateurs. {{url}}`.
-

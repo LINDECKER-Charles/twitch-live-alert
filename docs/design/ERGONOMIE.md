@@ -1,5 +1,7 @@
 # Ergonomie de la console 0.3.0
 
+[English overview](../en/INTERFACE.md)
+
 | Destination | Tâche et contrôles |
 | --- | --- |
 | Directs | Lire l’état de la surveillance, demander un relevé, mettre en pause ou reprendre. Chaque ligne nomme la règle du direct, la chaîne, le titre, l’heure de début et l’audience disponible. « Gérer les règles » ouvre la configuration. |

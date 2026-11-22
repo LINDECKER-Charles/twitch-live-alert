@@ -1,5 +1,7 @@
 # Console de surveillance Twitch
 
+[English overview](../../en/INTERFACE.md)
+
 ### Version 0.2.0 · historique
 
 La console s’adresse à la personne qui suit des directs Twitch sur son PC. Le geste courant consiste à vérifier la surveillance puis ouvrir une chaîne. La connexion Twitch et les préférences sont configurées à l’installation ou lors d’un changement de périmètre. Le nombre de chaînes simultanées dépend de la catégorie et de la langue choisies. Le journal se parcourt par pages de 50 notifications. Les directs s’affichent par tranches de 50 chaînes, avec le total du relevé et un bouton pour poursuivre.

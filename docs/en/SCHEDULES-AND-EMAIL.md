@@ -47,4 +47,3 @@ The subject and body are plain text. Insert values with double braces, for examp
 | `{{rule}}` | Name of the rule that detected the stream. |
 
 For the subject, try `[{{rule}}] {{user_name}} is live`. For the body, try `{{title}} — {{category}} ({{language}}) · {{viewer_count}} viewers. {{url}}`.
-

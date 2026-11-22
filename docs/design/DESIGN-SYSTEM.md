@@ -1,5 +1,7 @@
 # Direction graphique
 
+[English overview](../en/INTERFACE.md)
+
 Twitch Live Alert est une console de bureau locale. Sa fenêtre doit permettre de lire l’état de la surveillance, son périmètre et l’heure du dernier relevé, y compris lorsqu’aucune chaîne ne diffuse. Les surfaces graphite distinguent la navigation, le bandeau de détection et les listes. L’accent mauve relie le pictogramme, la destination courante, le focus et l’action principale disponible.
 
 ## Références examinées

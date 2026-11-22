@@ -1,5 +1,7 @@
 # Planche de la console 0.3.0
 
+[English overview](../en/INTERFACE.md)
+
 ![Directs de démonstration avec leur règle et les derniers canaux de notification](apercu-directs.png)
 
 ![Trois règles avec leurs calendriers, canaux et états de détection](regles.png)
