@@ -6,6 +6,8 @@
 
 Dans **Règles**, choisissez les jours et les heures pendant lesquels cette règle doit interroger Twitch. Sans plage, elle surveille toute la journée. La langue est celle déclarée par le diffuseur. Si deux règles couvrent le même direct, chacune peut déclencher ses propres canaux.
 
+Vous pouvez créer jusqu’à 64 règles. Les filtres identiques partagent leur relevé. Le service borne les appels Helix à 120 par minute pour la session, avec une requête en vol à la fois. Un grand nombre de filtres ou de pages peut donc rallonger un cycle.
+
 Le fuseau local suit le PC. Choisissez un fuseau nommé, par exemple `Europe/Paris`, pour conserver des horaires parisiens lorsque le PC change de fuseau. La fin d’une plage est exclue. Une plage du vendredi 22 h au samedi 2 h se configure en sélectionnant **vendredi** et en saisissant **22:00–02:00**. Des heures de début et de fin identiques désignent toute la journée sélectionnée.
 
 Pendant une fermeture, le PC en veille ou l’arrêt du logiciel, aucun relevé n’a lieu pour la règle concernée. À la reprise, la règle considère les directs encore en ligne. Un direct qui a entièrement eu lieu pendant l’interruption ne pourra pas être retrouvé par cette surveillance. Le choix d’alerter au premier relevé détermine le traitement initial d’un filtre neuf. Le journal et la déduplication sont persistants.

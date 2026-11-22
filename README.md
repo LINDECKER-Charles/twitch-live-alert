@@ -4,6 +4,10 @@
 
 Suivez les directs Twitch par catégorie et par langue. Chaque règle peut déclencher une notification Windows avec le logo de l’application, un courriel, ou les deux. Les horaires de détection et d’envoi se règlent indépendamment. La liste des directs et le journal identifient la règle concernée.
 
+![Sélection d’une catégorie parmi les résultats illustrés de Twitch](docs/design/recherche-categories.png)
+
+[Voir les règles](docs/design/regles.png) · [Voir la configuration du courriel](docs/design/courriel.png)
+
 ## Installer et commencer
 
 1. Téléchargez et lancez l’installateur sur Windows 10 ou 11 x64. Il est non signé. La page de version indique son empreinte SHA-256. Microsoft Edge WebView2 est téléchargé si nécessaire.

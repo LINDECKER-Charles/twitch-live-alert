@@ -6,6 +6,8 @@
 
 Open **Règles** and set the weekdays and times when this rule should poll Twitch. With no windows it watches throughout the day. Language means the language selected by the broadcaster. Each matching rule may notify through its own channels.
 
+You can create up to 64 rules. Matching filters share a poll. The service limits Helix traffic to 120 requests per minute per session with one request in flight at a time. Many filters or pages can make a polling cycle take longer.
+
 Local time follows the PC. Select a named time zone such as `Europe/Paris` to keep the schedule on Paris time while travelling. The end of a window is exclusive. To watch from Friday 22:00 until Saturday 02:00, select **Friday** as the starting day and enter **22:00–02:00**. Equal start and end times cover the entire selected calendar day.
 
 While the window is closed, the PC is asleep or the program is stopped, the rule does not poll. On return it processes streams still live. A stream that starts and ends entirely during the gap cannot be recovered by polling. The initial-poll setting controls first observations for a new filter. Alert history and deduplication survive restarts.

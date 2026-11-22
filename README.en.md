@@ -4,6 +4,10 @@
 
 Follow Twitch streams by category and broadcast language. Create separate rules, receive Windows notifications or email, and search the alert history on your PC. The dashboard runs in a desktop window or your local browser. The interface is in French. The guide below uses the labels you will see on screen.
 
+![Category picker showing Twitch box art](docs/design/recherche-categories.png)
+
+[Rules screen](docs/design/regles.png) · [Email settings](docs/design/courriel.png)
+
 ## Start monitoring
 
 1. Run the unsigned installer on Windows 10 or 11 x64 and open **Twitch Live Alert** from the Start menu. The installer downloads WebView2 if needed. The release page includes the installer’s SHA-256 checksum.
