@@ -62,7 +62,7 @@ function channelLink(url) {
 
 function createEntry(data, historical) {
   const row = document.createElement("li");
-  row.dataset.key = historical ? data.stream_id : data.id;
+  row.dataset.key = JSON.stringify([historical ? data.stream_id : data.id, data.rule_id, data.channel, historical && data.recorded_at]);
   const marker = document.createElement("span");
   marker.className = "row-icon";
   marker.append(icon(historical ? "bell" : "stream"));
@@ -85,6 +85,13 @@ function createEntry(data, historical) {
     const title = document.createElement("p");
     title.textContent = data.title;
     copy.append(title);
+  }
+  if (data.rule_name || historical && data.channel) {
+    const source = document.createElement("small");
+    source.className = "entry-rule";
+    const names = { email: "Courriel", desktop: "Windows" };
+    source.append(icon("filter"), document.createTextNode([data.rule_name, historical && names[data.channel]].filter(Boolean).join(" · ")));
+    copy.append(source);
   }
   const detail = document.createElement("span");
   detail.className = "row-meta";

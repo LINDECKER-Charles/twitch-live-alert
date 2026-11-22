@@ -89,7 +89,9 @@ test('le navigateur peut préparer une surveillance sur une installation neuve e
       assert.equal(status.notify_existing_on_first_run, false);
       for (const [path, mime] of [
         ['/', 'text/html'], ['/style.css', 'text/css'], ['/app.js', 'javascript'],
-        ['/lists.js', 'javascript'], ['/category-picker.js', 'javascript'], ['/mark.svg', 'image/svg+xml'],
+        ['/lists.js', 'javascript'], ['/category-picker.js', 'javascript'], ['/rules.js', 'javascript'],
+        ['/schedules.js', 'javascript'], ['/mail.js', 'javascript'], ['/connection.js', 'javascript'],
+        ['/mark.svg', 'image/svg+xml'],
       ]) {
         const response = await request(path);
         assert.equal(response.status, 200, path);
