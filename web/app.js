@@ -1,8 +1,10 @@
-import { createCategoryPicker } from "./category-picker.js";
-import { createJournal, dateLabel, emptyState, renderRows, text } from "./lists.js";
+import { createRules } from "./rules.js";
+import { createMail } from "./mail.js";
+import { createConnection } from "./connection.js";
+import { createJournal, dateLabel, emptyState, icon, renderRows, text } from "./lists.js";
 
 const id = name => document.getElementById(name);
-const labels = { directs: "Directs", journal: "Journal", reglages: "Réglages", connexion: "Connexion Twitch" };
+const labels = { directs: "Directs", journal: "Journal", regles: "Règles", courriel: "Courriel", reglages: "Réglages", connexion: "Connexion Twitch" };
 const disconnection = "Le service local ne répond pas. Relancez Twitch Live Alert, puis réessayez.";
 const languages = new Intl.DisplayNames(["fr"], { type: "language" });
 // ISO 639-1 codes. Twitch also accepts the language "other".
@@ -17,7 +19,9 @@ const streamPageSize = 50;
 let visibleStreams = streamPageSize;
 let requestingStatus = false;
 const journal = createJournal(request, id);
-const categoryPicker = createCategoryPicker(id, request, settingsEdited);
+const rules = createRules(id, request, say, langName, refresh);
+const mail = createMail(id, request, say);
+const connection = createConnection(id, request, say, refresh);
 
 function langName(code) {
   if (!code) return "Toutes les langues";
@@ -41,8 +45,6 @@ function say(element, message, tone = "") {
 
 function currentSettings() {
   return {
-    category: status && !status.configured ? status.category : id("category").value.trim(),
-    language: id("language").value,
     poll_interval_seconds: id("poll-interval").valueAsNumber,
     notify_existing_on_first_run: id("notify-first").checked,
     start_with_windows: id("start-windows").checked,
@@ -54,11 +56,6 @@ function changed(values = currentSettings(), stored = status) {
 }
 
 function fillSettings(data) {
-  id("category").value = data.category;
-  if (![...id("language").options].some(option => option.value === data.language)) {
-    id("language").add(new Option(langName(data.language), data.language));
-  }
-  id("language").value = data.language;
   id("poll-interval").value = data.poll_interval_seconds;
   id("notify-first").checked = data.notify_existing_on_first_run;
   id("start-windows").checked = data.start_with_windows;
@@ -71,23 +68,25 @@ function controls() {
   id("check-now").disabled = !usable || !status?.configured || !status?.running || busy;
   id("check-now").querySelector("span").textContent = pending === "check" ? "Vérification…" : "Vérifier maintenant";
   const toggle = id("toggle-monitor");
-  toggle.hidden = !status?.configured;
+  toggle.hidden = !status?.configured || status.active_rule_count === 0;
   toggle.disabled = !usable || busy;
-  toggle.classList.toggle("primary", status?.running === false);
-  toggle.querySelector("span").textContent = status?.running === false ? "Reprendre" : "Mettre en pause";
-  toggle.querySelector("use").setAttribute("href", status?.running === false ? "#i-play" : "#i-pause");
+  toggle.classList.toggle("primary", status?.enabled === false);
+  toggle.querySelector("span").textContent = status?.enabled === false ? "Reprendre" : "Mettre en pause";
+  toggle.querySelector("use").setAttribute("href", status?.enabled === false ? "#i-play" : "#i-pause");
   id("setup-link").hidden = !usable || status.configured;
   id("test-notification").disabled = !usable || busy;
   id("settings-fields").disabled = !usable || pending === "settings";
   id("save-settings").disabled = !usable || busy || !changed();
-  id("credentials-fields").disabled = !usable || pending === "credentials";
-  id("save-credentials").disabled = !usable || busy || !id("client-id").value.trim() || !id("client-secret").value;
+  rules.setContext(usable, Boolean(status?.configured));
+  mail.setOnline(usable);
+  connection.setOnline(usable);
 }
 
 function describeMonitor() {
   if (!connected) return ["Service hors connexion", "bad", "La surveillance ne peut pas être consultée sur ce PC."];
   if (!status.configured) return ["Twitch à configurer", "warn", "Connectez votre application Twitch pour détecter les premiers directs."];
   if (status.last_error) return ["Surveillance dégradée", "warn", status.last_error];
+  if (status.active_rule_count === 0) return ["Aucune règle active", "warn", "Créez ou activez une règle pour lancer la détection."];
   if (!status.running) return ["Surveillance en pause", "", "Reprenez la surveillance pour vérifier les directs automatiquement."];
   return ["Surveillance active", "good", "Les directs sont vérifiés toutes les " + status.poll_interval_seconds + " secondes."];
 }
@@ -97,10 +96,17 @@ function renderStreams() {
   const hasResult = Boolean(status?.last_checked_at) || streams.length > 0;
   id("stream-count").hidden = !hasResult;
   text(id("stream-count"), String(streams.length));
-  id("filters").hidden = !status;
+  const filters = id("filters");
+  filters.hidden = !status;
   if (status) {
-    text(id("category-tag"), status.category);
-    text(id("language-tag"), langName(status.language));
+    const count = status.active_rule_count ?? 0;
+    const label = count + (count === 1 ? " règle active" : " règles actives");
+    if (filters.dataset.label !== label) {
+      const tag = document.createElement("span");
+      tag.append(icon("filter"), document.createTextNode(label));
+      filters.replaceChildren(tag);
+      filters.dataset.label = label;
+    }
   }
   let heading = "", detail = "", symbol = "radio";
   if (!connected) {
@@ -112,6 +118,9 @@ function renderStreams() {
   } else if (status.last_error) {
     heading = streams.length ? "Dernier relevé disponible" : "Vérification indisponible";
     detail = "La dernière vérification Twitch a échoué.";
+  } else if (status.active_rule_count === 0) {
+    heading = "Aucune règle active";
+    detail = "Activez une règle depuis la page Règles.";
   } else if (!status.running) {
     heading = streams.length ? "Dernier relevé avant la pause" : "Recherche en pause";
     detail = streams.length ? "" : "Reprenez la surveillance pour rechercher des chaînes.";
@@ -120,7 +129,7 @@ function renderStreams() {
     detail = "La liste se remplira après la première vérification Twitch.";
   } else if (streams.length === 0) {
     heading = "Aucune chaîne en direct";
-    detail = "Aucun direct ne correspond actuellement aux filtres de surveillance.";
+    detail = "Aucun direct ne correspond actuellement aux règles de surveillance.";
   }
   const message = id("stream-message");
   emptyState(message, symbol, heading, detail);
@@ -148,10 +157,6 @@ function render() {
   const nextLabel = next ? (next * 1000 <= Date.now() ? "Imminente" : dateLabel(next, true)) : "En attente";
   text(id("next-check"), scheduled ? nextLabel : "—");
   text(id("notifications-state"), status ? (status.notifications_available ? "Disponibles" : "Indisponibles") : "—");
-  const configured = status?.configured;
-  say(id("credentials-state"), !connected ? "État inconnu" : configured ? "Configurée" : "À configurer",
-    !connected ? "" : configured ? "good" : "warn");
-  categoryPicker.setContext(connected, Boolean(status?.configured), status?.category);
   renderStreams();
   controls();
 }
@@ -173,16 +178,19 @@ async function request(path, body, signal) {
     const result = await response.json().catch(() => null);
     if (!response.ok) {
       let message = typeof result?.message === "string" ? result.message : "Le service local a refusé la demande.";
-      if (path === "credentials" && Object.values(body).some(value => value && message.includes(value))) {
+      if (body && [body.client_secret, body.client_id, body.password, body.username].some(value => value && message.includes(value))) {
         message = "Impossible d’enregistrer les identifiants. Vérifiez la saisie, puis réessayez.";
       }
       throw new Error(message);
     }
     return result;
+  } catch (error) {
+    if (error instanceof TypeError || error.name === "AbortError") throw Error(disconnection);
+    throw error;
   } finally { clearTimeout(timeout); signal?.removeEventListener("abort", abort); }
 }
 
-function applyStatus(data, sync = !changed() && (!status || id("category").value === status.category)) {
+function applyStatus(data, sync = !changed()) {
   if (data?.app_id !== "twitch-live-alert" || !Array.isArray(data.live_streams)) throw Error("Réponse inattendue du service local.");
   if (data.category !== status?.category || data.language !== status?.language) visibleStreams = streamPageSize;
   status = data;
@@ -235,8 +243,9 @@ function route(focus = true) {
   const hash = location.hash.slice(1);
   const next = Object.hasOwn(labels, hash) ? hash : "directs";
   if (page === next) return;
-  if (page === "connexion") id("credentials-form").reset();
-  if (page === "reglages") categoryPicker.close();
+  if (page === "connexion") connection.leave();
+  if (page === "courriel") mail.clearSecrets();
+  if (page === "regles") rules.closePicker();
   page = next;
   for (const section of document.querySelectorAll("[data-page]")) section.hidden = section.dataset.page !== page;
   for (const link of document.querySelectorAll("[data-nav]")) {
@@ -251,6 +260,9 @@ function route(focus = true) {
   }
   controls();
   if (page === "journal") void journal.load();
+  if (page === "regles") void rules.load();
+  if (page === "courriel") void mail.load();
+  if (page === "connexion") void connection.load();
 }
 
 function settingsEdited() {
@@ -263,24 +275,9 @@ id("settings-form").addEventListener("submit", event => {
   event.preventDefault();
   if (!changed()) return;
   const values = currentSettings();
-  if (!values.category) {
-    say(id("settings-feedback"), "Saisissez le nom d’une catégorie Twitch.", "bad"); id("category").focus(); return;
-  }
   void act("settings", id("settings-feedback"), "Enregistrement en cours…", async () => {
     applyStatus(await request("settings", values), true);
     return "Réglages enregistrés.";
-  });
-});
-id("credentials-form").addEventListener("input", () => { say(id("credential-feedback"), ""); controls(); });
-id("credentials-form").addEventListener("submit", event => {
-  event.preventDefault();
-  const clientId = id("client-id").value.trim();
-  const secret = id("client-secret").value;
-  if (!clientId || !secret) return;
-  void act("credentials", id("credential-feedback"), "Enregistrement en cours…", async () => {
-    applyStatus(await request("credentials", { client_id: clientId, client_secret: secret }));
-    id("credentials-form").reset();
-    return "Identifiants Twitch enregistrés.";
   });
 });
 id("show-more").addEventListener("click", event => {
@@ -296,8 +293,8 @@ id("check-now").addEventListener("click", () => void act("check", id("watch-feed
   return "Vérification demandée.";
 }));
 id("toggle-monitor").addEventListener("click", () => void act("monitoring", id("watch-feedback"), "Mise à jour de la surveillance…", async () => {
-  applyStatus(await request("monitoring", { enabled: !status.running }));
-  return status.running ? "Surveillance reprise." : "Surveillance mise en pause.";
+  applyStatus(await request("monitoring", { enabled: !status.enabled }));
+  return status.enabled ? "Surveillance reprise." : "Surveillance mise en pause.";
 }));
 id("test-notification").addEventListener("click", () => void act("test", id("test-feedback"), "Envoi à Windows…", async () => {
   const data = await request("test-notification", {});
@@ -306,7 +303,7 @@ id("test-notification").addEventListener("click", () => void act("test", id("tes
 
 document.querySelector(".skip").addEventListener("click", event => { event.preventDefault(); id("main").focus(); });
 window.addEventListener("hashchange", () => route());
-window.addEventListener("pagehide", () => id("credentials-form").reset());
+window.addEventListener("pagehide", () => { connection.leave(); mail.clearSecrets(); });
 initLanguages();
 emptyState(id("stream-message"), "radio", "Chargement des directs…");
 route(false);
@@ -315,5 +312,6 @@ setInterval(() => {
   if (document.hidden) return;
   void refresh();
   if (page === "journal") void journal.load();
+  if (page === "courriel") void mail.delivery();
 }, 5000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { void refresh(); if (page === "journal") void journal.load(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { void refresh(); if (page === "journal") void journal.load(); if (page === "courriel") void mail.delivery(); } });

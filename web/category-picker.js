@@ -1,157 +1,117 @@
-import { icon, text } from "./lists.js";
+import { icon } from "./lists.js";
 
-const limit = 8;
+export function cover(category) {
+  const frame = document.createElement("span");
+  frame.className = "cover";
+  const fallback = icon("game");
+  frame.append(fallback);
+  if (!category?.box_art_url) return frame;
+  try {
+    const sized = category.box_art_url.replaceAll("{width}", "144").replaceAll("{height}", "192");
+    const url = new URL(sized);
+    if (url.origin !== "https://static-cdn.jtvnw.net" || !url.pathname.startsWith("/ttv-boxart/") || url.username || url.password) return frame;
+    // Search returns a small fixed-size cover. Games may return a size template instead.
+    url.pathname = url.pathname.replace(/-\d+x\d+(?=\.(?:jpg|jpeg|png)$)/i, "-144x192");
+    const image = new Image();
+    image.alt = "";
+    image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => image.remove());
+    image.src = url.href;
+    frame.append(image);
+  } catch { /* Keep the category name and pictogram when artwork is unavailable. */ }
+  return frame;
+}
 
-export function createCategoryPicker(id, request, onSelection) {
-  const input = id("category");
-  const toggle = id("category-toggle");
-  const panel = id("category-popup");
-  const list = id("category-options");
-  const feedback = id("category-feedback");
-  const help = id("category-help");
-  const saved = id("category-current");
-  let available = false;
-  let savedName = "";
+export function createCategoryPicker(id, request, choose) {
+  const dialog = id("category-dialog");
+  const field = id("category-query");
+  const list = id("category-results");
+  const hint = id("picker-feedback");
+  const retry = id("retry-picker");
   let timer;
+  let generation = 0;
   let controller;
-  let active = -1;
-  let openingDirection = 0;
+  let currentName = "";
 
-  function highlight(index) {
-    const previous = list.children[active];
-    if (previous) previous.setAttribute("aria-selected", "false");
-    active = index;
-    const option = list.children[index];
-    if (option) {
-      option.setAttribute("aria-selected", "true");
-      input.setAttribute("aria-activedescendant", option.id);
-      option.scrollIntoView({ block: "nearest" });
-    } else input.removeAttribute("aria-activedescendant");
-  }
-
-  function cancelSearch() {
+  function reset() {
     clearTimeout(timer);
     controller?.abort();
-    controller = null;
-    openingDirection = 0;
-  }
-
-  function close() {
-    cancelSearch();
-    highlight(-1);
-    panel.hidden = true;
-    input.setAttribute("aria-expanded", "false");
-    toggle.setAttribute("aria-expanded", "false");
-  }
-
-  function showSaved() {
-    const different = savedName && input.value.trim() !== savedName;
-    text(saved, different ? "Catégorie enregistrée · " + savedName : "");
-  }
-
-  function setContext(connected, configured, current) {
-    available = connected && configured;
-    savedName = current || "";
-    toggle.disabled = !available;
-    input.readOnly = !configured;
-    if (connected && !configured && current) input.value = current;
-    id("category-connect").hidden = !connected || configured;
-    text(help, !connected ? "Le service local est hors connexion. Votre saisie est conservée."
-      : configured ? "Recherchez une catégorie dans le catalogue Twitch ou saisissez son nom exact."
-      : "Connectez Twitch pour rechercher et changer de catégorie.");
-    if (!available && !panel.hidden) close();
-    showSaved();
-  }
-
-  function resultOption(name, index) {
-    const li = document.createElement("li");
-    li.id = "category-option-" + index;
-    li.setAttribute("role", "option");
-    li.setAttribute("aria-selected", "false");
-    li.dataset.name = name;
-    const word = document.createElement("span");
-    word.textContent = name;
-    li.append(icon("game"), word);
-    if (name === savedName) li.append(icon("check"));
-    return li;
-  }
-
-  async function search(query, signal) {
-    try {
-      const result = await request("categories?" + new URLSearchParams({ q: query }), undefined, signal);
-      if (signal.aborted) return;
-      if (!Array.isArray(result?.items)) throw new Error();
-      const names = [...new Set(result.items.map(item => item?.name).filter(name => typeof name === "string" && name.trim()))];
-      const shown = names.slice(0, limit);
-      list.replaceChildren(...shown.map(resultOption));
-      const count = names.length > limit ? limit + " premiers résultats" : shown.length + (shown.length === 1 ? " résultat" : " résultats");
-      text(feedback, shown.length ? count + " pour « " + query + " »" : "Aucune catégorie trouvée pour « " + query + " ».");
-      id("category-keys").hidden = shown.length === 0;
-      if (openingDirection && shown.length) highlight(openingDirection > 0 ? 0 : shown.length - 1);
-    } catch {
-      if (!signal.aborted) text(feedback, "Recherche Twitch indisponible. Rouvrez la liste pour réessayer ou saisissez le nom exact.");
-    }
-  }
-
-  function open(direction = 0) {
-    if (!available || input.matches(":disabled")) return;
-    cancelSearch();
-    highlight(-1);
+    generation++;
+    retry.hidden = true;
     list.replaceChildren();
-    panel.hidden = false;
-    input.setAttribute("aria-expanded", "true");
-    toggle.setAttribute("aria-expanded", "true");
-    id("category-keys").hidden = true;
-    const query = input.value.trim();
-    if (!query) {
-      text(feedback, "Saisissez quelques lettres pour rechercher une catégorie.");
-      return;
-    }
-    text(feedback, "Recherche de « " + query + " »…");
-    openingDirection = direction;
-    controller = new AbortController();
-    const signal = controller.signal;
-    timer = setTimeout(() => void search(query, signal), 280);
   }
 
-  function choose(option) {
-    if (!option) return;
-    input.value = option.dataset.name;
-    close();
-    input.focus({ preventScroll: true });
-    showSaved();
-    onSelection();
+  async function search(immediate = false) {
+    reset();
+    const term = field.value.trim();
+    if (!term) { hint.textContent = "Saisissez un nom pour chercher une catégorie."; return; }
+    const ticket = generation;
+    hint.textContent = "Recherche dans le catalogue Twitch…";
+    const run = async () => {
+      controller = new AbortController();
+      try {
+        const data = await request("categories?q=" + encodeURIComponent(term), undefined, controller.signal);
+        if (ticket !== generation) return;
+        const items = data.items.filter(item => typeof item.name === "string" && item.name.trim()).slice(0, 8);
+        hint.textContent = items.length === 0 ? "Aucune catégorie trouvée. Essayez un autre nom." :
+          items.length === 1 ? "1 catégorie trouvée" : items.length + " catégories trouvées";
+        for (const item of items) {
+          const li = document.createElement("li");
+          const tile = document.createElement("button");
+          tile.type = "button";
+          tile.className = "category-tile";
+          const label = document.createElement("strong");
+          label.textContent = item.name;
+          tile.append(cover(item), label);
+          if (currentName === item.name) {
+            tile.setAttribute("aria-current", "true");
+            const selected = document.createElement("span");
+            selected.className = "tile-current";
+            selected.append(icon("check"), document.createTextNode("Choisie"));
+            tile.append(selected);
+          }
+          tile.addEventListener("click", () => { choose(item); dialog.close(); });
+          li.append(tile);
+          list.append(li);
+        }
+      } catch {
+        if (ticket !== generation) return;
+        hint.textContent = "Catalogue Twitch indisponible. Vérifiez la connexion et réessayez.";
+        retry.hidden = false;
+      }
+    };
+    if (immediate) await run(); else timer = setTimeout(run, 260);
   }
 
-  input.addEventListener("input", () => { showSaved(); open(); });
-  input.addEventListener("click", () => { if (panel.hidden) open(); });
-  input.addEventListener("blur", close);
-  toggle.addEventListener("pointerdown", event => event.preventDefault());
-  toggle.addEventListener("click", () => {
-    input.focus({ preventScroll: true });
-    if (panel.hidden) open(); else close();
+  field.addEventListener("input", () => void search());
+  retry.addEventListener("click", () => void search(true));
+  dialog.addEventListener("keydown", event => {
+    const buttons = [...list.querySelectorAll("button")];
+    if (!buttons.length) return;
+    const index = buttons.indexOf(document.activeElement);
+    if (index === -1 && document.activeElement !== field) return;
+    const columns = getComputedStyle(list).gridTemplateColumns.split(" ").length;
+    let next;
+    if (event.key === "ArrowDown") next = index < 0 ? 0 : index + columns;
+    else if (index >= 0 && event.key === "ArrowUp") next = index - columns;
+    else if (index >= 0 && event.key === "ArrowLeft") next = index - 1;
+    else if (index >= 0 && event.key === "ArrowRight") next = index + 1;
+    else return;
+    event.preventDefault();
+    if (next < 0) field.focus();
+    else buttons[Math.min(next, buttons.length - 1)].focus();
   });
-  list.addEventListener("pointerdown", event => event.preventDefault());
-  list.addEventListener("click", event => choose(event.target.closest('[role="option"]')));
-  document.addEventListener("pointerdown", event => {
-    if (!panel.hidden && !id("category-picker").contains(event.target)) close();
-  });
-  input.addEventListener("keydown", event => {
-    if (event.isComposing) return;
-    if (event.key === "Enter") {
-      event.preventDefault();
-      if (!panel.hidden && active >= 0) choose(list.children[active]); else close();
-    } else if (event.key === "Tab" || event.key === "Escape") {
-      if (event.key === "Escape" && !panel.hidden) event.preventDefault();
-      close();
-    } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && available) {
-      event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : -1;
-      const length = list.children.length;
-      if (panel.hidden) open(event.altKey ? 0 : step);
-      else if (!length) openingDirection = step;
-      else if (!event.altKey) highlight(active < 0 ? (step > 0 ? 0 : length - 1) : (active + step + length) % length);
-    } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) highlight(-1);
-  });
-  return { setContext, close };
+  id("close-picker").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", reset);
+  return {
+    open(name) {
+      currentName = name || "";
+      field.value = currentName;
+      dialog.showModal();
+      field.focus();
+      field.select();
+      void search(true);
+    },
+    close() { if (dialog.open) dialog.close(); },
+  };
 }

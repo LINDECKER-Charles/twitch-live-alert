@@ -32,13 +32,13 @@
     <symbol id="i-stream" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="15" rx="2"/><path d="m10 8 5 3.5-5 3.5z"/></symbol>
     <symbol id="i-stack" viewBox="0 0 24 24"><path d="m12 3 10 5-10 5L2 8l10-5Zm-9 10 9 4.5 9-4.5M3 17l9 4.5 9-4.5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
-    <symbol id="i-plug" viewBox="0 0 24 24"><path d="m8 4 3 3m4-6 3 3m-9 7 7-7 4 4-7 7-4-4Zm1 3-4 4H3"/></symbol></svg>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="m8 4 3 3m4-6 3 3m-9 7 7-7 4 4-7 7-4-4Zm1 3-4 4H3"/></symbol><symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></symbol><symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol><symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol></svg>
   <a class="skip" href="#main">Aller au contenu</a>
   <aside class="sidebar">
     <a class="brand" href="#directs"><img src="/mark.svg" alt="" width="36" height="36"><span>Twitch Live Alert</span></a>
     <nav aria-label="Navigation principale">
       <div class="nav-group"><p>Surveillance</p><a class="nav-link" href="#directs" data-nav="directs"><svg aria-hidden="true" class="icon"><use href="#i-radio"/></svg><span>Directs</span></a><a class="nav-link" href="#journal" data-nav="journal"><svg aria-hidden="true" class="icon"><use href="#i-history"/></svg><span>Journal</span></a></div>
-      <div class="nav-group"><p>Configuration</p><a class="nav-link" href="#reglages" data-nav="reglages"><svg aria-hidden="true" class="icon"><use href="#i-sliders"/></svg><span>Réglages</span></a><a class="nav-link" href="#connexion" data-nav="connexion"><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg><span>Connexion Twitch</span></a></div>
+      <div class="nav-group"><p>Configuration</p><a class="nav-link" href="#regles" data-nav="regles"><svg aria-hidden="true" class="icon"><use href="#i-filter"/></svg><span>Règles</span></a><a class="nav-link" href="#courriel" data-nav="courriel"><svg aria-hidden="true" class="icon"><use href="#i-mail"/></svg><span>Courriel</span></a><a class="nav-link" href="#reglages" data-nav="reglages"><svg aria-hidden="true" class="icon"><use href="#i-sliders"/></svg><span>Réglages</span></a><a class="nav-link" href="#connexion" data-nav="connexion"><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg><span>Connexion Twitch</span></a></div>
     </nav>
     <div class="sidebar-footer"><svg aria-hidden="true" class="icon"><use href="#i-screen"/></svg><span>Service local<small id="service-state" role="status">Connexion en cours</small></span></div>
   </aside>
@@ -48,7 +48,7 @@
       <noscript><p class="notice">Activez JavaScript pour accéder à la surveillance et aux réglages.</p></noscript>
       <p class="notice" id="offline" role="status" hidden>Le service local ne répond pas. Relancez Twitch Live Alert si la fenêtre a été fermée. La connexion sera retentée automatiquement.</p>
       <section data-page="directs" aria-labelledby="title-directs">
-        <header class="page-head"><div><h1 id="title-directs" tabindex="-1">Directs</h1><p>Les chaînes Twitch qui correspondent à vos filtres.</p></div><button id="check-now" type="button" class="primary" disabled><svg aria-hidden="true" class="icon"><use href="#i-refresh"/></svg><span>Vérifier maintenant</span></button></header>
+        <header class="page-head"><div><h1 id="title-directs" tabindex="-1">Directs</h1><p>Les chaînes Twitch détectées par vos règles de surveillance.</p></div><button id="check-now" type="button" class="primary" disabled><svg aria-hidden="true" class="icon"><use href="#i-refresh"/></svg><span>Vérifier maintenant</span></button></header>
         <section class="monitor" aria-labelledby="monitor-state">
           <div class="monitor-body"><div><div class="caption"><span class="led" id="monitor-led"></span>Détection Twitch</div>
             <h2 id="monitor-state" aria-live="polite" aria-atomic="true">Connexion en cours</h2><p id="monitor-detail">Recherche du service local…</p>
@@ -64,8 +64,8 @@
           <dl class="monitor-facts"><div><dt><svg aria-hidden="true" class="icon"><use href="#i-clock"/></svg>Dernière vérification</dt><dd id="last-check">—</dd></div><div><dt><svg aria-hidden="true" class="icon"><use href="#i-refresh"/></svg>Prochaine vérification</dt><dd id="next-check">—</dd></div><div><dt><svg aria-hidden="true" class="icon"><use href="#i-bell"/></svg>Notifications Windows</dt><dd id="notifications-state">—</dd></div></dl>
         </section>
         <p class="feedback" id="watch-feedback" role="status"></p>
-        <section class="panel" aria-labelledby="streams-title"><header class="panel-header"><h2 id="streams-title">Chaînes en direct <span class="count" id="stream-count" hidden></span></h2><a class="text-link" href="#reglages"><svg aria-hidden="true" class="icon"><use href="#i-sliders"/></svg>Modifier les filtres</a></header>
-          <div class="filters" id="filters" hidden><span><svg aria-hidden="true" class="icon"><use href="#i-game"/></svg><span id="category-tag"></span></span><span><svg aria-hidden="true" class="icon"><use href="#i-globe"/></svg><span id="language-tag"></span></span></div>
+        <section class="panel" aria-labelledby="streams-title"><header class="panel-header"><h2 id="streams-title">Chaînes en direct <span class="count" id="stream-count" hidden></span></h2><a class="text-link" href="#regles"><svg aria-hidden="true" class="icon"><use href="#i-filter"/></svg>Gérer les règles</a></header>
+          <div class="filters" id="filters" hidden></div>
           <div id="stream-message" class="empty"></div><ul id="stream-list" class="rows"></ul>
           <footer class="pagination" id="more-streams" hidden><span id="stream-range"></span><button id="show-more" class="small" type="button">Afficher la suite</button></footer>
         </section>
@@ -77,48 +77,73 @@
         <div class="search-row"><label class="search"><svg aria-hidden="true" class="icon"><use href="#i-search"/></svg><span class="sr-only">Rechercher dans le journal</span><input id="history-query" type="search" placeholder="Rechercher une chaîne ou un titre…" maxlength="200"></label><button id="clear-search" class="small" type="button" hidden>Effacer</button></div>
         <p id="history-feedback" class="inline-feedback" role="status"></p><div id="history-message" class="empty"></div><ul id="history-list" class="rows"></ul><footer id="pagination" class="pagination" hidden><span id="history-range"></span><div><button id="previous" class="small" type="button">Précédent</button><button id="next" class="small" type="button">Suivant</button></div></footer></section>
       </section>
-      <section data-page="reglages" aria-labelledby="title-reglages" hidden>
-        <header class="page-head"><div><h1 id="title-reglages" tabindex="-1">Réglages</h1><p>Choisissez les directs à surveiller et la façon de recevoir les alertes.</p></div></header>
-        <form id="settings-form"><fieldset id="settings-fields" disabled>
-          <section class="panel form-card filter-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-filter"/></svg>Filtres de surveillance</h2></header><div class="form-grid">
-            <div class="field category-field">
-              <label for="category">Catégorie Twitch</label>
-              <div class="category-picker" id="category-picker">
-                <div class="category-control">
-                  <svg aria-hidden="true" class="icon"><use href="#i-search"/></svg>
-                  <input id="category" type="text" maxlength="200" placeholder="Rechercher une catégorie…" required autocomplete="off" spellcheck="false"
-                    role="combobox" aria-autocomplete="list" aria-controls="category-options" aria-expanded="false" aria-describedby="category-help category-current">
-                  <button id="category-toggle" type="button" tabindex="-1" aria-label="Afficher les suggestions de catégories" aria-controls="category-options" aria-expanded="false" disabled>
-                    <svg aria-hidden="true" class="icon"><use href="#i-chevron"/></svg>
-                  </button>
-                </div>
-                <div class="category-popup" id="category-popup" hidden>
-                  <p id="category-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
-                  <ul id="category-options" role="listbox" aria-label="Suggestions du catalogue Twitch"></ul>
-                  <div class="category-keys" id="category-keys" aria-hidden="true" hidden><span><kbd>↑</kbd><kbd>↓</kbd> Parcourir</span><span><kbd>Entrée</kbd> Choisir</span></div>
-                </div>
-              </div>
-              <small id="category-help">Chargement de la configuration…</small>
-              <a class="text-link" id="category-connect" href="#connexion" hidden>Configurer la connexion Twitch <svg aria-hidden="true" class="icon"><use href="#i-arrow"/></svg></a>
-              <small id="category-current"></small>
-            </div>
-            <div class="field"><label for="language">Langue des directs</label><select id="language" aria-describedby="language-help"><option value="">Toutes les langues</option></select><small id="language-help">Langue indiquée par la chaîne sur Twitch.</small></div>
+      <section data-page="regles" aria-labelledby="title-regles" hidden>
+        <header class="page-head"><div><h1 id="title-regles" tabindex="-1">Règles</h1><p>Choisissez les directs à détecter et le moment de recevoir vos alertes.</p></div><button type="button" id="new-rule" class="primary"><svg aria-hidden="true" class="icon"><use href="#i-plus"/></svg>Nouvelle règle</button></header>
+        <p id="rules-feedback" class="feedback" role="status"></p>
+        <section class="panel" id="rules-overview"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-filter"/></svg>Règles de surveillance</h2><span id="rules-count" class="dim"></span></header><div class="empty" id="rules-empty"></div><ul id="rules-list" class="rule-list"></ul></section>
+        <form id="rule-form" hidden><fieldset id="rule-fields">
+          <section class="panel"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-filter"/></svg><span id="rule-form-title">Nouvelle règle</span></h2></header><div class="form-grid">
+            <div class="field"><label for="rule-name">Nom de la règle</label><input id="rule-name" required maxlength="100" placeholder="Ex. Soirées à Yharnam" ></div>
+            <div class="field"><label for="language">Langue des directs</label><select id="language"><option value="">Toutes les langues</option></select></div>
+            <div class="field span-all"><label for="choose-category">Catégorie Twitch</label><button type="button" id="choose-category" class="category-choice" aria-haspopup="dialog"><span id="selected-art"></span><strong id="chosen-category">Choisir une catégorie</strong><svg aria-hidden="true" class="icon"><use href="#i-chevron"/></svg></button><small id="catalog-help"></small><a id="catalog-connect" class="text-link" href="#connexion" hidden>Configurer Twitch</a></div>
+          </div><label class="setting-row switch-row"><span>Activer la règle<small>Inclure cette règle dans la surveillance.</small></span><input class="switch" type="checkbox" id="rule-enabled"></label></section>
+          <section class="panel"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-clock"/></svg>Horaires de détection</h2></header><div class="stack" id="detection-schedule"></div></section>
+          <section class="panel"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-bell"/></svg>Canaux de notification</h2></header><div class="stack">
+            <div class="check-line"><label><input type="checkbox" id="rule-desktop"> Notification Windows</label><label><input type="checkbox" id="rule-email"> Courriel</label></div>
+            <fieldset id="mail-policy" hidden><div class="stack inset">
+              <div class="field"><label for="mail-mode">Envoi des courriels</label><select id="mail-mode"><option value="instant">Immédiat</option><option value="window">Dans les plages autorisées</option><option value="digest">Récapitulatif à heures fixes</option></select></div>
+              <small id="policy-help"></small><div id="delivery-schedule"></div>
+              <fieldset id="digest-fields" hidden><legend>Heures du récapitulatif</legend><div id="digest-times" class="times-list"></div><button type="button" id="add-time" class="small">Ajouter une heure</button></fieldset>
+              <a class="text-link" href="#courriel">Configurer le courriel <svg aria-hidden="true" class="icon"><use href="#i-arrow"/></svg></a>
+            </div></fieldset>
           </div></section>
+          <div class="form-actions"><button type="submit" class="primary" id="save-rule"><svg aria-hidden="true" class="icon"><use href="#i-check"/></svg>Enregistrer la règle</button><button type="button" id="cancel-rule" class="">Annuler</button></div>
+        </fieldset><p id="rule-feedback" class="feedback" role="status"></p></form>
+      </section>
+      <dialog id="category-dialog" aria-labelledby="picker-title"><header class="dialog-head"><div><h2 id="picker-title">Choisir une catégorie</h2><p>Recherchez dans le catalogue Twitch.</p></div><button type="button" id="close-picker" class="icon-button"><svg aria-hidden="true" class="icon"><use href="#i-close"/></svg><span class="sr-only">Fermer le catalogue</span></button></header>
+        <div class="picker-content"><label class="search picker-search"><svg aria-hidden="true" class="icon"><use href="#i-search"/></svg><span class="sr-only">Rechercher une catégorie Twitch</span><input type="search" id="category-query" maxlength="100" autocomplete="off" placeholder="Nom d’une catégorie…" autofocus></label><p id="picker-feedback" role="status"></p><ul id="category-results" aria-label="Catégories trouvées"></ul><button type="button" id="retry-picker" class="small">Réessayer</button></div>
+      </dialog>
+      <section data-page="courriel" aria-labelledby="title-courriel" hidden>
+        <header class="page-head"><div><h1 id="title-courriel" tabindex="-1">Courriel</h1><p>Configurez l’envoi et personnalisez les messages de vos règles.</p></div></header>
+        <p id="mail-load" class="feedback" role="status"></p><button type="button" id="retry-mail" class="small">Réessayer</button>
+        <section class="panel delivery-panel" aria-labelledby="delivery-title">
+          <header class="panel-header"><h2 id="delivery-title"><svg aria-hidden="true" class="icon"><use href="#i-mail"/></svg>Envois automatiques</h2><span id="delivery-state" class="status-tag">Chargement…</span></header>
+          <div class="stack" id="delivery-info" role="status"><p id="delivery-summary">Lecture de la file de courriels…</p><p id="delivery-error" data-tone="bad" hidden></p><p id="delivery-next" hidden></p></div>
+        </section>
+        <form id="mail-form" autocomplete="off"><fieldset id="mail-fields" disabled>
+          <section class="panel"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-mail"/></svg>Expéditeur et destinataires</h2></header><div class="form-grid">
+          <div class="field"><label for="mail-sender">Expéditeur</label><input id="mail-sender" required placeholder="Alertes Twitch <alertes@exemple.fr>" ></div>
+          <div class="field"><label for="mail-recipients">Destinataires</label><textarea id="mail-recipients" required rows="2" placeholder="destinataire@exemple.fr" aria-describedby="mail-recipients-hint"></textarea><small id="mail-recipients-hint">Une adresse par ligne.</small></div></div></section>
+          <section class="panel"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-lock"/></svg>Serveur SMTP</h2></header><div class="form-grid smtp-grid">
+            <div class="field"><label for="mail-host">Serveur</label><input id="mail-host" required placeholder="smtp.exemple.fr" autocapitalize="none" spellcheck="false" ></div><div class="field"><label for="mail-port">Port</label><input id="mail-port" required type="number" min="1" max="65535" ></div><div class="field"><label for="mail-security">Chiffrement</label><select id="mail-security"><option value="tls">TLS dès la connexion</option><option value="starttls">STARTTLS obligatoire</option></select></div>
+          </div><div class="stack auth-section"><div class="field"><label for="mail-auth">Authentification</label><select id="mail-auth"><option value="keep">Conserver la configuration</option><option value="replace">Renseigner des identifiants</option><option value="clear">Sans authentification</option></select></div><div id="smtp-auth-fields" class="form-grid flush" hidden>
+          <div class="field"><label for="smtp-user">Nom d’utilisateur</label><input id="smtp-user" autocomplete="off" spellcheck="false" autocapitalize="none" ></div><div class="field"><label for="smtp-password">Mot de passe SMTP</label><input id="smtp-password" type="password" autocomplete="new-password" ></div></div></div></section>
+          <section class="panel"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-mail"/></svg>Modèle du message</h2></header><div class="stack"><div class="field"><label for="mail-subject">Objet</label><input id="mail-subject" required maxlength="512" ></div><div class="field"><label for="mail-body">Corps du message</label><textarea id="mail-body" required rows="5" maxlength="16384"></textarea></div>
+          <details class="variables"><summary>Variables disponibles</summary><p>Insérez une variable dans le dernier champ de modèle sélectionné. Une valeur absente s’affiche « — ».</p><div id="mail-variables"></div></details>
+          <div class="inline-actions"><button type="button" id="preview-mail" class=""><svg aria-hidden="true" class="icon"><use href="#i-eye"/></svg>Aperçu du message</button><button type="button" id="default-template" class="small">Rétablir le modèle par défaut</button></div>
+          <p id="preview-feedback" class="feedback" role="status"></p><section id="mail-preview" class="mail-preview" aria-label="Aperçu du courriel" hidden><small>Objet</small><h3 id="preview-subject"></h3><small>Message</small><pre id="preview-body"></pre></section></div></section>
+          <div class="form-actions"><button type="submit" class="primary" id="save-mail"><svg aria-hidden="true" class="icon"><use href="#i-check"/></svg>Enregistrer le courriel</button></div>
+        </fieldset><p id="mail-feedback" class="feedback" role="status"></p></form>
+        <section class="panel test-panel"><div><h2><svg aria-hidden="true" class="icon"><use href="#i-mail"/></svg>Courriel de test</h2><p id="mail-test-help">Envoyer un message aux destinataires enregistrés.</p></div><button type="button" id="test-mail" class="">Envoyer un test</button><p id="mail-test-feedback" class="feedback" role="status"></p></section>
+      </section>
+      <section data-page="reglages" aria-labelledby="title-reglages" hidden>
+        <header class="page-head"><div><h1 id="title-reglages" tabindex="-1">Réglages</h1><p>Réglez le rythme de surveillance et le démarrage de l’application.</p></div></header>
+        <form id="settings-form"><fieldset id="settings-fields" disabled>
           <section class="panel form-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-clock"/></svg>Fonctionnement</h2></header>
           <div class="setting-row"><div><label for="poll-interval">Intervalle de vérification</label><small id="interval-help">De 15 à 3 600 secondes.</small></div><div class="number-input"><input id="poll-interval" type="number" min="15" max="3600" step="1" inputmode="numeric" required aria-describedby="interval-help interval-unit"><span id="interval-unit">secondes</span></div></div>
-          <label class="setting-row switch-row"><span>Avertir des directs déjà en cours<small>Inclure les chaînes en ligne lors du premier relevé de chaque nouveau filtre.</small></span><input id="notify-first" class="switch" type="checkbox"></label>
+          <label class="setting-row switch-row"><span>Avertir des directs déjà en cours<small>Inclure les chaînes en ligne lors du premier relevé de chaque nouvelle règle.</small></span><input id="notify-first" class="switch" type="checkbox"></label>
           <label class="setting-row switch-row"><span>Lancer avec Windows<small>Démarrer la surveillance à l’ouverture de votre session.</small></span><input id="start-windows" class="switch" type="checkbox"></label></section>
         </fieldset><div class="form-actions"><button id="save-settings" class="primary" type="submit" disabled><svg aria-hidden="true" class="icon"><use href="#i-check"/></svg>Enregistrer les réglages</button><p class="feedback" id="settings-feedback" role="status"></p></div></form>
         <section class="panel test-panel"><div><h2><svg aria-hidden="true" class="icon"><use href="#i-bell"/></svg>Notification de test</h2><p>Vérifiez que Windows affiche les alertes sur ce PC.</p></div><button id="test-notification" type="button" disabled>Envoyer un test</button><p class="feedback" id="test-feedback" role="status"></p></section>
       </section>
       <section data-page="connexion" aria-labelledby="title-connexion" hidden>
         <header class="page-head"><div><h1 id="title-connexion" tabindex="-1">Connexion Twitch</h1><p>Autorisez la surveillance à interroger le catalogue des directs Twitch.</p></div></header>
-        <section class="panel connect-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg>Identifiants d’application</h2><span id="credentials-state" class="status-tag">En attente</span></header>
-          <form id="credentials-form" autocomplete="off"><fieldset id="credentials-fields" disabled>
+        <section class="panel connect-card"><header class="panel-header"><h2><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg>Application Twitch</h2><span id="credentials-state" class="status-tag">Chargement…</span></header><div class="stack" id="connection-info"><p id="connection-detail"></p><small id="connection-date"></small><div class="inline-actions"><button type="button" id="verify-connection" class="primary"><svg aria-hidden="true" class="icon"><use href="#i-refresh"/></svg>Vérifier la connexion</button><button type="button" id="edit-connection" class="">Remplacer les identifiants</button><button type="button" id="disconnect-twitch" class="danger">Déconnecter</button></div><div id="disconnect-confirm" hidden><p>Déconnecter Twitch et interrompre les relevés de vos règles ?</p><div class="inline-actions"><button type="button" id="keep-connection" class="">Annuler</button><button type="button" id="confirm-disconnect" class="danger">Confirmer la déconnexion</button></div></div></div>
+          <form id="credentials-form" autocomplete="off" hidden><fieldset id="credentials-fields" disabled>
           <div class="form-intro"><p>Copiez les identifiants d’une application depuis la console développeur Twitch.</p><a class="text-link" href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">Ouvrir la console Twitch <svg aria-hidden="true" class="icon"><use href="#i-external"/></svg></a></div>
           <div class="field"><label for="client-id">Identifiant client <span lang="en">Client ID</span></label><input id="client-id" required type="text" spellcheck="false" autocomplete="off" autocapitalize="none"></div>
           <div class="field"><label for="client-secret">Secret client <span lang="en">Client Secret</span></label><input id="client-secret" required type="password" spellcheck="false" autocomplete="off" aria-describedby="secret-help"><small id="secret-help"><svg aria-hidden="true" class="icon"><use href="#i-lock"/></svg>Le secret reste masqué. Les champs sont vidés après l’enregistrement.</small></div>
-          </fieldset><div class="form-actions"><button id="save-credentials" type="submit" class="primary" disabled><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg>Enregistrer les identifiants</button><p class="feedback" id="credential-feedback" role="status"></p></div></form>
+          </fieldset><div class="form-actions"><button id="save-credentials" type="submit" class="primary" disabled><svg aria-hidden="true" class="icon"><use href="#i-key"/></svg>Connecter Twitch</button><button type="button" id="cancel-connection" class="">Annuler</button></div></form><p id="credential-feedback" class="feedback" role="status"></p>
         </section><a class="back-link text-link" href="#directs">Retour aux directs <svg aria-hidden="true" class="icon"><use href="#i-arrow"/></svg></a>
       </section>
     </main>
