@@ -26,6 +26,8 @@ For example, watch from 18:00 to 23:00 on Friday and send a summary at 09:00 on 
 
 An overdue digest is processed after restart when monitoring, the rule and email delivery are active. If the clock skips a scheduled digest time, the application uses the next valid time on that day. If the clock repeats the scheduled time, it uses the first occurrence. SQLite keeps pending deliveries. SMTP can accept a message just before the client loses its connection or the program stops. Retrying that message can produce a duplicate with the same `Message-ID`.
 
+Pending messages keep the delivery mode and schedule in effect at detection. At send time the service uses the current SMTP settings, recipients and templates. Disabling a rule pauses its pending deliveries. Deleting the rule cancels its queued messages. A delivery already in progress may complete. Accepted deliveries remain in the history.
+
 ## Configure your mail server
 
 Open **Courriel**. Enter the SMTP host and port, encryption mode, sender and recipients provided by your mail service. Implicit TLS generally uses port 465, mandatory STARTTLS generally uses 587. Both verify the server certificate. Windows DPAPI protects the saved login and password for your account. **Envoyer un test** sends an actual message to the configured recipients. **Aperçu du message** renders a local preview. Delivery status shows queued mail, failures and the next retry. After you correct the SMTP settings, the service retries pending messages.
