@@ -6,6 +6,15 @@ pub const APP_ID: &str = "TwitchLiveAlert.Desktop";
 
 pub trait Notifier {
     fn notify(&self, stream: &Stream) -> impl Future<Output = Result<()>>;
+
+    fn notify_rule(
+        &self,
+        _rule_id: &str,
+        _rule_name: &str,
+        stream: &Stream,
+    ) -> impl Future<Output = Result<()>> {
+        self.notify(stream)
+    }
 }
 
 #[derive(Debug)]
@@ -52,14 +61,13 @@ impl DesktopNotifier {
     }
 
     fn show(&self, tag: &str, title: &str, body: &str, url: &str) -> Result<()> {
-        let xml = toast_xml(title, body, url);
         #[cfg(windows)]
         {
-            native::show(tag, &xml)
+            native::show(tag, title, body, url)
         }
         #[cfg(not(windows))]
         {
-            let _ = (tag, xml);
+            let _ = (tag, title, body, url);
             Err(
                 NotificationError("Les notifications locales nécessitent Windows 10 ou 11".into())
                     .into(),
@@ -78,17 +86,30 @@ impl Notifier for DesktopNotifier {
             &stream.url(),
         )
     }
+
+    async fn notify_rule(&self, rule_id: &str, rule_name: &str, stream: &Stream) -> Result<()> {
+        stream.validate()?;
+        self.show(
+            &format!("{rule_id}:{}", stream.id),
+            &format!("{} est en direct", stream.user_name),
+            &format!("{rule_name} · {}", stream.title),
+            &stream.url(),
+        )
+    }
 }
 
-pub(crate) fn toast_xml(title: &str, body: &str, url: &str) -> String {
+#[cfg(any(windows, test))]
+pub(crate) fn toast_xml(title: &str, body: &str, url: &str, logo_uri: &str) -> String {
     let title = escape_xml(title, 200);
     let body = escape_xml(body, 600);
     let url = escape_xml(url, 2048);
+    let logo = escape_xml(logo_uri, 32768);
     format!(
-        r#"<toast activationType="protocol" launch="{url}" duration="long"><visual><binding template="ToastGeneric"><text>{title}</text><text>{body}</text><text placement="attribution">Twitch Live Alert</text></binding></visual><actions><action content="Voir sur Twitch" activationType="protocol" arguments="{url}"/></actions><audio src="ms-winsoundevent:Notification.Default"/></toast>"#
+        r#"<toast activationType="protocol" launch="{url}" duration="long"><visual><binding template="ToastGeneric"><text>{title}</text><text>{body}</text><image placement="appLogoOverride" src="{logo}" alt="Twitch Live Alert"/><text placement="attribution">Twitch Live Alert</text></binding></visual><actions><action content="Voir sur Twitch" activationType="protocol" arguments="{url}"/></actions><audio src="ms-winsoundevent:Notification.Default"/></toast>"#
     )
 }
 
+#[cfg(any(windows, test))]
 fn escape_xml(value: &str, limit: usize) -> String {
     let mut text = String::new();
     for ch in value
@@ -123,16 +144,39 @@ mod native {
         NotificationError(format!("{operation} : {error}")).into()
     }
 
-    pub fn register() -> Result<()> {
+    fn save_logo(dir: &std::path::Path) -> Result<std::path::PathBuf> {
+        use std::{fs, io::Write};
+        const PNG: &[u8] = include_bytes!("notification/logo.png");
+        let file = dir.join("notification-logo.png");
+        if fs::read(&file).as_deref().is_ok_and(|stored| stored == PNG) {
+            return Ok(file);
+        }
+        fs::create_dir_all(dir)?;
+        let mut pending = tempfile::NamedTempFile::new_in(dir)?;
+        pending.write_all(PNG)?;
+        pending.persist(&file)?;
+        Ok(file)
+    }
+
+    pub fn register() -> Result<reqwest::Url> {
+        let dir = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| failure("emplacement du logo", "LOCALAPPDATA indisponible"))?;
+        let logo =
+            save_logo(&dir.join("TwitchLiveAlert")).map_err(|e| failure("écriture du logo", e))?;
+        let uri = reqwest::Url::from_file_path(&logo)
+            .map_err(|_| failure("emplacement du logo", "chemin absolu requis"))?;
         let key = windows_registry::CURRENT_USER
             .create(format!(r"Software\Classes\AppUserModelId\{APP_ID}"))
             .map_err(|e| failure("enregistrement de l’identité", e))?;
         key.set_string("DisplayName", "Twitch Live Alert")
             .map_err(|e| failure("enregistrement du nom", e))?;
+        key.set_string("IconUri", logo.to_string_lossy())
+            .map_err(|e| failure("enregistrement du logo", e))?;
         // Protocol-only activation is handled by Windows, including after this app exits.
         key.set_string("CustomActivator", "{1D0E707F-2F09-49DC-BF84-E75B83951F5C}")
             .map_err(|e| failure("enregistrement de l’activateur", e))?;
-        Ok(())
+        Ok(uri)
     }
 
     fn enabled(notifier: &windows::UI::Notifications::ToastNotifier) -> Result<bool> {
@@ -151,8 +195,9 @@ mod native {
             .is_ok_and(|notifier| enabled(&notifier).unwrap_or(false))
     }
 
-    pub fn show(tag: &str, xml: &str) -> Result<()> {
-        register()?;
+    pub fn show(tag: &str, title: &str, body: &str, url: &str) -> Result<()> {
+        let logo_uri = register()?;
+        let xml = toast_xml(title, body, url, logo_uri.as_str());
         let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_ID))
             .map_err(|e| failure("création de l’émetteur", e))?;
         if !enabled(&notifier)? {
@@ -173,6 +218,31 @@ mod native {
             .map_err(|e| failure("affectation du groupe", e))?;
         notifier.Show(&toast).map_err(|e| failure("affichage", e))?;
         Ok(())
+    }
+
+    #[test]
+    fn logo_is_available_for_windows_after_the_service_exits() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("logo espace & accent é");
+        let logo = save_logo(&dir).unwrap();
+        let uri = reqwest::Url::from_file_path(&logo).unwrap();
+        assert_eq!(uri.to_file_path().unwrap(), logo);
+        let png = std::fs::read(&logo).unwrap();
+        assert_eq!(&png[16..24], &[0, 0, 1, 0, 0, 0, 1, 0]);
+        std::fs::write(&logo, b"invalid").unwrap();
+        assert_eq!(std::fs::read(save_logo(&dir).unwrap()).unwrap(), png);
+        let doc = XmlDocument::new().unwrap();
+        doc.LoadXml(&HSTRING::from(toast_xml(
+            "Live",
+            "Twitch",
+            "https://www.twitch.tv/",
+            uri.as_str(),
+        )))
+        .unwrap();
+        let image = doc
+            .SelectSingleNode(&HSTRING::from("//image[@placement='appLogoOverride']/@src"))
+            .unwrap();
+        assert_eq!(image.InnerText().unwrap().to_string(), uri.as_str());
     }
 
     pub(super) fn notification_tag(value: &str) -> String {

@@ -368,13 +368,24 @@ fn native_toast_escapes_untrusted_text_and_opens_twitch_by_protocol() {
         "A < B & C",
         "</text><action/>\0 🩸",
         "https://www.twitch.tv/hunter_1",
+        "file:///C:/test/logo.png",
     );
+    assert!(xml.contains("placement=\"appLogoOverride\" src=\"file:///C:/test/logo.png\""));
     assert!(xml.contains("A &lt; B &amp; C"));
     assert!(xml.contains("&lt;/text&gt;&lt;action/&gt;"));
     assert!(!xml.contains('\0'));
     assert!(xml.contains("activationType=\"protocol\" launch=\"https://www.twitch.tv/hunter_1\""));
     assert!(xml.contains("content=\"Voir sur Twitch\""));
-    assert!(toast_xml("T", &"🩸".repeat(20000), "https://www.twitch.tv/test").len() < 4000);
+    assert!(
+        toast_xml(
+            "T",
+            &"🩸".repeat(20000),
+            "https://www.twitch.tv/test",
+            "file:///C:/test/logo.png"
+        )
+        .len()
+            < 4000
+    );
 }
 #[tokio::test]
 async fn unauthorized_streams_refreshes_token_once() {
