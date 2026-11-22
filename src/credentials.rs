@@ -59,7 +59,7 @@ impl Credentials {
 }
 
 #[cfg(windows)]
-fn protect(bytes: &[u8], encrypt: bool) -> Result<Vec<u8>> {
+pub(crate) fn protect(bytes: &[u8], encrypt: bool) -> Result<Vec<u8>> {
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::{
         Foundation::LocalFree,
@@ -116,6 +116,6 @@ fn protect(bytes: &[u8], encrypt: bool) -> Result<Vec<u8>> {
 }
 
 #[cfg(not(windows))]
-fn protect(_: &[u8], _: bool) -> Result<Vec<u8>> {
+pub(crate) fn protect(_: &[u8], _: bool) -> Result<Vec<u8>> {
     bail!("Le stockage sécurisé des identifiants nécessite Windows")
 }
