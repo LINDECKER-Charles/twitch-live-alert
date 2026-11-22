@@ -1,24 +1,29 @@
-# Planche de la console locale
+# Planche de la console 0.3.0
 
-![Console Twitch Live Alert avec trois chaînes de démonstration](apercu-directs.png)
+![Directs de démonstration avec leur règle et les derniers canaux de notification](apercu-directs.png)
 
-Capture de présentation réalisée le 22 novembre 2026 à 1 280 px. Les trois chaînes, les audiences et les notifications sont des données de démonstration du [scénario navigateur](verify_ui.py).
+![Trois règles avec leurs calendriers, canaux et états de détection](regles.png)
 
-| Spécimen | Destination | Implémentation utilisée |
-| --- | --- | --- |
-| Marque et navigation courante | Toutes | [Pictogramme](../../web/mark.svg), [structure sémantique](../../web/index.html), [navigation par fragment](../../web/app.js) |
-| Surveillance, actions et fraîcheur | Directs | [État et commandes](../../web/app.js), [bandeau et réduction mobile](../../web/style.css) |
-| Chaîne et notification | Directs et Journal | [Même rendu de rangée, lien de chaîne et date](../../web/lists.js) |
-| Recherche, reprise d’erreur et pagination | Journal | [Contrôleur du journal](../../web/lists.js) |
-| Filtres, options et identifiants | Réglages et Connexion Twitch | [Formulaires HTML](../../web/index.html), [validation et retours locaux](../../web/app.js) |
+![Catalogue Twitch de démonstration présentant quatre jaquettes Dark Souls réelles](recherche-categories.png)
 
-![Suggestions de catégories Twitch dans la vue Réglages](recherche-categories.png)
+[Configuration du courriel et aperçu de modèle](courriel.png) · [Catalogue à 390 px](catalogue-mobile.png)
 
-Le [sélecteur de catégorie](../../web/category-picker.js) interroge le catalogue 280 ms après la fin de la saisie et présente au plus huit noms. La capture montre des réponses de démonstration pour « Elden ». Au clavier, le focus reste sur le champ pendant le parcours des options. À 390 px, la liste déplace le champ Langue sous les résultats pour le laisser accessible. Le contrat d’interaction suit le modèle de sélection manuelle avec saisie. [W3C, exemple de combobox éditable](https://www.w3.org/WAI/ARIA/apg/patterns/combobox/examples/combobox-autocomplete-list/)
+## Sources des captures
+
+Captures réalisées le 22 novembre 2026 dans Edge headless. Le navigateur affiche les sources de production. Les comptes, destinataires, horaires, résultats de recherche, états de connexion et réponses SMTP proviennent de la [fixture HTTP](ui_fixture.py). Les couvertures proviennent du CDN public de Twitch. Le test a chargé les images JPEG d’origine en 144 × 192 et vérifié leur décodage. Le scénario anonyme évite de publier les données du profil installé. [Catalogue Helix](https://dev.twitch.tv/docs/api/reference/#search-categories)
+
+| Spécimen | Source |
+| --- | --- |
+| Navigation, connexion locale et bandeau Directs | [Structure HTML](../../web/index.html), [contrôleur principal](../../web/app.js), [jetons et composants](../../web/style.css) |
+| Direct ou alerte avec règle et canal | [Rendu des listes et du journal](../../web/lists.js) |
+| Liste des règles, plage actuelle et horaires | [Règles](../../web/rules.js), [calendriers](../../web/schedules.js) |
+| Modale de sélection, recherche et images de remplacement | [Catalogue](../../web/category-picker.js) |
+| Connexion vérifiée, modification et déconnexion | [Connexion Twitch](../../web/connection.js) |
+| File automatique, paramètres SMTP, modèle et aperçu | [Courriel](../../web/mail.js) |
 
 ## Rejouer la vérification
 
-Le programme ouvre le navigateur en mode headless, charge les sources de `web/` et intercepte les appels HTTP. Les données et les mutations sont conservées en mémoire pour la durée du scénario. Les réponses HTML portent la politique de contenu du service. Python 3.11 ou ultérieur et Playwright servent uniquement à la vérification.
+Python 3.11 ou ultérieur et Playwright suffisent. Par défaut, le scénario intercepte le trafic HTTP et utilise le pictogramme de remplacement pour les images. Les tests reprennent le numéro de version du manifeste Cargo.
 
 ```sh
 python -m pip install playwright
@@ -26,8 +31,23 @@ python -m playwright install chromium
 python docs/design/verify_ui.py
 ```
 
-Sur un PC avec Edge déjà installé, `python docs/design/verify_ui.py --channel msedge` utilise ce navigateur. L’option `--captures target/qa/interface` conserve les vues de travail. `--readme docs/design/apercu-directs.png` régénère l’aperçu des directs. L’option `--category-capture docs/design/recherche-categories.png` produit la capture du sélecteur ouvert. Pour l’analyse d’accessibilité, ajouter `--axe chemin/vers/axe.min.js` avec un exemplaire local d’axe-core.
+Sur un PC avec Edge installé, ajouter `--channel msedge`. L’option `--axe chemin/vers/axe.min.js` vérifie les règles WCAG A et AA utilisées par le scénario. Pour préparer les captures, ranger les jaquettes du CDN dans un dossier de travail. Chaque fichier porte l’identifiant de catégorie et l’extension `.jpg`. Le lien [Dark Souls](https://static-cdn.jtvnw.net/ttv-boxart/29433_IGDB-144x192.jpg) illustre le format d’URL. Les six identifiants et noms figurent dans [CATALOG](ui_fixture.py).
 
-Vérifications des 21 et 22 novembre 2026 avec Edge 158 et axe-core 4.14. Le parcours couvre le premier lancement au clavier, le refus puis l’enregistrement d’identifiants fictifs, l’effacement des champs, les suggestions de catégorie, la langue, la conservation du brouillon, les préférences, le test de notification accepté ou refusé, la demande de vérification, la pause et la reprise. Le journal contient 53 entrées de test pour exercer recherche, pagination, absence de résultat, échec et nouvel essai. Le sélecteur est exercé au clavier, à la souris et au toucher, avec chargement, échec, absence de résultat, réponse périmée et rejet d’une catégorie inconnue. Le test vérifie également la modification de la langue sur un profil sans identifiants et le rendu d’une date de début absente ou invalide. Une catégorie de 120 chaînes vérifie l’affichage initial et le chargement des deux tranches suivantes. Une coupure et une reprise du service vérifient la conservation de la dernière liste.
+```sh
+python docs/design/verify_ui.py --channel msedge --art-dir target/qa/jaquettes --captures target/qa/interface --category-capture docs/design/recherche-categories.png --readme docs/design/apercu-directs.png
+```
 
-La vue Directs a aussi été capturée à 1 180 × 820 px. Les quatre destinations ont été testées à 390 et 320 px sans débordement horizontal. Les captures Directs, Journal, Connexion, Réglages mobile, premier lancement et dégradation ont fait l’objet d’une inspection visuelle. Les règles WCAG A et AA sélectionnées par le script n’ont produit aucune violation sur les quatre destinations à 1 280 px. La livraison réelle d’une alerte Windows et l’authentification Twitch nécessitent un autre essai avec le service et son environnement de bureau.
+L’option `--fixture-version` fixe le numéro affiché dans une présentation de version. Le répertoire de sortie contient les vues complètes de création et modification, les versions mobiles, un exemple de panne de file, les trois politiques d’envoi et le modèle avec aperçu.
+
+## Parcours vérifiés
+
+Le [scénario navigateur](verify_ui.py) a été exécuté sous Edge avec axe-core 4.14.0. Il vérifie les six destinations à 390 et 320 px, la modification complète d’une règle à ces deux largeurs et les règles WCAG A/AA sélectionnées sur les destinations, la modale et l’éditeur. Aucun débordement horizontal ni violation axe n’a été relevé dans ces scénarios.
+
+- Connexion au clavier, refus, réussite, vérification, remplacement, annulation et déconnexion. Les champs restent masqués après succès.
+- Recherche de catégorie avec attente, absence de résultat, échec, nouvel essai, sélection au clavier et au toucher, fermeture par Échap et retour du focus. Le rail, le titre et le fil d’Ariane indiquent tous Règles.
+- Création, modification, désactivation, réactivation et suppression. La liste donne accès aux plages multiples au clavier. Les calculs couvrent les horaires locaux et IANA, le passage de dimanche à lundi, la fin exclusive d’une plage, la journée entière et les deux occurrences d’une heure lors du recul automnal.
+- Envoi immédiat, plage autorisée et récapitulatif à 00:00 et 18:00 avec jours et fuseau dédiés. Le formulaire garde séparément la détection nocturne de 22:00 à 02:00.
+- Configuration SMTP, changement de serveur, sauvegarde des destinataires, insertion de variable, aperçu texte avec valeur absente, refus et réussite du test. La file présente le nombre de messages en attente, un échec SMTP assaini, la prochaine tentative et le retour à une file vide.
+- Réglages globaux, pause et reprise, test Windows, historique de 53 événements et direct de 120 chaînes. Une coupure du service garde la dernière liste. Les dates de début absentes et illisibles restent gérées.
+
+Ces vérifications exercent le navigateur avec des réponses simulées. Les essais de la livraison utilisant le binaire, Twitch et SMTP sont documentés séparément par la version publiée.
