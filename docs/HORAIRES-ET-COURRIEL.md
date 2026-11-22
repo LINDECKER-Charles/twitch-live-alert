@@ -28,7 +28,7 @@ Un récapitulatif arrivé à échéance pendant l’arrêt du PC est traité à 
 
 ## Configurer le serveur
 
-Dans **Courriel**, renseignez l’hôte, le port, le mode de chiffrement, l’expéditeur et les destinataires. Utilisez les paramètres fournis par votre messagerie. TLS implicite utilise généralement le port 465 et STARTTLS obligatoire le port 587. Les deux modes valident le certificat du serveur. L’identifiant et le mot de passe enregistrés sont protégés par Windows DPAPI. **Envoyer un test** transmet un vrai message aux destinataires configurés. **Aperçu du message** permet de contrôler votre modèle localement.
+Dans **Courriel**, renseignez l’hôte, le port, le mode de chiffrement, l’expéditeur et les destinataires. Utilisez les paramètres fournis par votre messagerie. TLS implicite utilise généralement le port 465 et STARTTLS obligatoire le port 587. Les deux modes valident le certificat du serveur. L’identifiant et le mot de passe enregistrés sont protégés par Windows DPAPI. **Envoyer un test** transmet un vrai message aux destinataires configurés. **Aperçu du message** permet de contrôler votre modèle localement. Le suivi des livraisons indique les courriels en attente, les erreurs et la prochaine tentative prévue. Après une correction des paramètres SMTP, le service réessaie les messages encore en attente.
 
 ## Écrire un modèle
 

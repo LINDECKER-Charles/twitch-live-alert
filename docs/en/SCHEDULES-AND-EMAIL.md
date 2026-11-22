@@ -28,7 +28,7 @@ An overdue digest is processed after restart when monitoring, the rule and email
 
 ## Configure your mail server
 
-Open **Courriel**. Enter the SMTP host and port, encryption mode, sender and recipients provided by your mail service. Implicit TLS generally uses port 465, mandatory STARTTLS generally uses 587. Both verify the server certificate. Windows DPAPI protects the saved login and password for your account. **Envoyer un test** sends an actual message to the configured recipients. **Aperçu du message** renders a local preview.
+Open **Courriel**. Enter the SMTP host and port, encryption mode, sender and recipients provided by your mail service. Implicit TLS generally uses port 465, mandatory STARTTLS generally uses 587. Both verify the server certificate. Windows DPAPI protects the saved login and password for your account. **Envoyer un test** sends an actual message to the configured recipients. **Aperçu du message** renders a local preview. Delivery status shows queued mail, failures and the next retry. After you correct the SMTP settings, the service retries pending messages.
 
 ## Write a template
 

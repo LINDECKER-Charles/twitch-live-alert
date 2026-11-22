@@ -45,7 +45,7 @@ From a source checkout, `cargo build --locked --release` creates `target/release
 | --- | --- |
 | `--check-config` | Check configuration without contacting Twitch. |
 | `--dry-run` | Read streams from Twitch without notifying or recording a delivery. |
-| `--once` | Run one legacy command-line polling cycle and exit. |
+| `--once` | Poll eligible rules once, handle due deliveries and exit. |
 | `--no-web` | Run the command-line monitor without the web server. |
 | `--port 37220` | Use another loopback port. Give concurrent instances independent data directories. |
 | `--test-notification` | Ask Windows to show a test notification. |
