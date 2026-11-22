@@ -28,7 +28,7 @@ The default polling interval is 60 seconds. Short broadcasts may start and end b
 | --- | --- |
 | Directs | See matching streams, the responsible rule and viewer counts. Open a channel on Twitch. |
 | Journal | Browse past alerts, search and identify the rule and delivery channel. |
-| Règles | Name, add, edit, enable or delete rules. Configure detection and delivery for each one. |
+| Règles | Name, add, edit, enable or delete rules. See detection windows, email schedules, time zones and whether a rule is currently in its detection window. |
 | Courriel | Set up SMTP, sender and recipients, edit templates, preview, or send a test message. |
 | Réglages | Set the global polling interval, first observation behaviour and Windows startup. |
 | Connexion Twitch | Check the saved Twitch connection, replace the credentials or disconnect. |

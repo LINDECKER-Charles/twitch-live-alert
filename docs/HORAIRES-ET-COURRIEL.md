@@ -26,7 +26,7 @@ Par exemple, surveillez le vendredi de 18 h à 23 h avec un récapitulatif à 9 
 
 Un récapitulatif arrivé à échéance pendant l’arrêt du PC est traité à la reprise lorsque la règle, le canal et la surveillance sont actifs. Un changement d’heure qui supprime une heure de récapitulatif reporte son échéance au premier instant représentable suivant ce jour-là. Lorsqu’une heure apparaît deux fois, sa première occurrence déclenche le récapitulatif. Une livraison mise en attente est conservée dans SQLite. Après une interruption entre l’acceptation par le serveur SMTP et la confirmation locale, une nouvelle tentative peut envoyer un doublon avec le même `Message-ID`.
 
-Le mode et l’horaire d’un message en attente sont ceux de la règle au moment de la détection. Le service utilise les paramètres SMTP, les destinataires et les modèles en vigueur au moment de l’envoi. Désactiver une règle suspend ses envois en attente. Supprimer la règle annule ses envois en attente. Un envoi déjà engagé peut aboutir ; les livraisons acceptées restent dans le journal.
+Le mode et l’horaire d’un message en attente sont ceux de la règle au moment de la détection. Le service utilise les paramètres SMTP, les destinataires et les modèles en vigueur au moment de l’envoi. Désactiver une règle suspend ses envois en attente. Supprimer la règle annule ses envois en attente. Un envoi déjà engagé peut aboutir. Les livraisons acceptées restent dans le journal.
 
 ## Configurer le serveur
 

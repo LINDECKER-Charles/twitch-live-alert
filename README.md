@@ -34,7 +34,7 @@ Après validation, la page indique l’état de la connexion et permet de la vé
 | --- | --- |
 | Directs | Voir les chaînes du dernier relevé, leur règle, leur titre et leur audience, puis ouvrir une chaîne. |
 | Journal | Rechercher une alerte et retrouver la règle et le canal associés à sa livraison. |
-| Règles | Créer, modifier, activer, désactiver ou supprimer une règle. Choisir catégorie, langue, canaux, horaires de détection et horaires de courriel. |
+| Règles | Créer, modifier, activer, désactiver ou supprimer une règle. Lire les plages de détection et le programme de courriel de chaque règle, avec son fuseau et son état dans la plage. |
 | Courriel | Renseigner le serveur SMTP et les destinataires, composer un modèle, afficher un aperçu et envoyer un test. |
 | Réglages | Régler l’intervalle global et le premier relevé, choisir le démarrage avec Windows. |
 | Connexion Twitch | Vérifier l’état de la connexion, remplacer les identifiants ou déconnecter l’application. |
