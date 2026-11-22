@@ -103,8 +103,7 @@ impl<N: Notifier> Poller<'_, N> {
                             continue;
                         }
                         self.store
-                            .initialize_rule(rule, &streams, self.notify_existing)?;
-                        self.store.queue(rule, &streams, now)?;
+                            .observe(rule, &streams, self.notify_existing, now)?;
                         report
                             .live
                             .extend(streams.iter().map(|s| LiveStream::new(rule, s)));
