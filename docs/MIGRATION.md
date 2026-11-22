@@ -1,4 +1,15 @@
-# Reprendre une installation Bloodborne FR Live
+# Mettre à niveau ou migrer une installation
+
+[English](en/MIGRATION.md) · [Distribution Windows](DISTRIBUTION.md)
+
+## Passer de Twitch Live Alert 0.2.0 à 0.3.0
+
+1. Notez la catégorie, la langue, l’intervalle, la préférence de démarrage et quelques entrées du journal. Choisissez **Quitter** dans la zone de notification.
+2. Copiez le dossier `%LOCALAPPDATA%\TwitchLiveAlert\data` dans une sauvegarde personnelle. Gardez ensemble la base SQLite et ses éventuels fichiers auxiliaires, les réglages et le fichier Twitch déjà protégé par Windows DPAPI.
+3. Installez la 0.3.0 sous le même compte Windows et ouvrez l’application. Votre ancien filtre devient une règle de notification Windows. La connexion Twitch et le journal sont repris. Le courriel nécessite une configuration distincte.
+4. Vérifiez **Règles**, **Journal** et **Connexion Twitch**. Pour revenir à la 0.2.0, quittez la 0.3.0, gardez séparément son profil courant, réinstallez la 0.2.0 et restaurez la sauvegarde réalisée avant la migration. Les alertes reçues depuis la mise à niveau restent dans le profil de la 0.3.0.
+
+## Reprendre une installation Bloodborne FR Live 0.1
 
 La version 0.1 conservait les réglages et le journal dans le dossier `data` du dépôt. La version installée de Twitch Live Alert utilise un profil propre à la session Windows. Les deux programmes utilisent le port local 37219. Prévoyez une courte interruption pour effectuer la bascule.
 

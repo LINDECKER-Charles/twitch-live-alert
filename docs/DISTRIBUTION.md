@@ -1,13 +1,15 @@
 # Distribution Windows
 
-## Télécharger la version 0.2.0
+[English](en/DISTRIBUTION.md)
 
-[Télécharger l’installateur pour Windows 10 et 11 (x64)](https://github.com/LINDECKER-Charles/twitch-live-alert/releases/download/v0.2.0/Twitch-Live-Alert_0.2.0_x64-setup.exe)
+## Télécharger la version 0.3.0
 
-L’installateur est non signé. Pour vérifier le fichier, ouvrez PowerShell dans le dossier de téléchargement et comparez le résultat de la commande ci-dessous à l’empreinte SHA-256 publiée sur la [page de la version 0.2.0](https://github.com/LINDECKER-Charles/twitch-live-alert/releases/tag/v0.2.0).
+[Télécharger l’installateur pour Windows 10 et 11 (x64)](https://github.com/LINDECKER-Charles/twitch-live-alert/releases/download/v0.3.0/Twitch-Live-Alert_0.3.0_x64-setup.exe)
+
+L’installateur est non signé. Pour vérifier le fichier, ouvrez PowerShell dans le dossier de téléchargement et comparez le résultat de la commande ci-dessous à l’empreinte SHA-256 publiée sur la [page de la version 0.3.0](https://github.com/LINDECKER-Charles/twitch-live-alert/releases/tag/v0.3.0).
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\Twitch-Live-Alert_0.2.0_x64-setup.exe
+Get-FileHash -Algorithm SHA256 .\Twitch-Live-Alert_0.3.0_x64-setup.exe
 ```
 
 ## Fabriquer l’installeur
@@ -15,10 +17,10 @@ Get-FileHash -Algorithm SHA256 .\Twitch-Live-Alert_0.2.0_x64-setup.exe
 Utilisez un hôte Windows avec Rust MSVC, les outils C++ de Visual Studio et le SDK Windows. La CI cible Windows x64 avec Rust 1.99.1. Le script utilise la CLI Cargo Tauri installée ou télécharge la CLI 2.12.0 avec `npx` si Node.js est disponible. Pour installer la version Cargo utilisée pour cette distribution, exécutez `cargo install tauri-cli --version 2.12.0 --locked`.
 
 ```powershell
-.\scripts\build-desktop.ps1
+.\scripts\build-desktop.ps1 -PublicRelease
 ```
 
-Le script compile `twitch-live-alert.exe` en profil release, le copie dans le répertoire de préparation Tauri avec le suffixe de la cible Rust, puis fabrique le paquet NSIS. Les deux binaires se trouvent côte à côte après installation. Rust, Node et le dépôt sont nécessaires uniquement à la construction. L’installeur télécharge le runtime Microsoft Edge WebView2 si Windows en a besoin. [Documentation Windows de Tauri](https://v2.tauri.app/distribute/windows-installer/)
+Le script compile `twitch-live-alert.exe` en profil release, le copie dans le répertoire de préparation Tauri avec le suffixe de la cible Rust, puis fabrique le paquet NSIS. L’option de publication remplace les chemins locaux de compilation et retire le répertoire du fichier PDB dans les exécutables. Les deux binaires se trouvent côte à côte après installation. Rust, Node et le dépôt sont nécessaires uniquement à la construction. L’installeur télécharge le runtime Microsoft Edge WebView2 si Windows en a besoin. [Documentation Windows de Tauri](https://v2.tauri.app/distribute/windows-installer/)
 
 Après une construction locale, l’installeur x64 se trouve dans `src-tauri/target/release/bundle/nsis/` avec la configuration Cargo par défaut. La CI du dépôt public teste le paquet dans l’espace temporaire du runner. [Parcours de contribution](../CONTRIBUTING.md)
 
@@ -38,22 +40,17 @@ Le lanceur vérifie dans Windows le PID à l’écoute, le chemin du binaire et 
 | Emplacement dans `%LOCALAPPDATA%\TwitchLiveAlert\` | Contenu |
 | --- | --- |
 | `data/settings.json` | Réglages et filtres. |
-| `data/alerts.sqlite3` | Historique des alertes. |
+| `data/alerts.sqlite3` | Journal et état des livraisons, y compris les courriels en attente. |
 | `data/twitch.dpapi` | Identifiants Twitch protégés par Windows pour ce compte. |
+| `data/mail.json` | Configuration SMTP, modèles et authentification protégée par DPAPI. |
 | `webview/` | Profil du navigateur intégré. |
 | `desktop-startup.log` | Dernier diagnostic d’échec au démarrage du bureau. |
 
 La désinstallation standard retire les binaires et l’entrée de démarrage associée à ce chemin. Le profil de surveillance conserve l’historique et les réglages pour une réinstallation. Pour archiver la base, quittez d’abord le service afin que SQLite termine ses écritures.
 
-### Reprendre une installation Bloodborne FR Live
+### Mettre à niveau une installation
 
-1. Repérez le dépôt de l’ancien service, son profil `data/` et ses raccourcis `Bloodborne FR Live.lnk` dans le Bureau et le dossier Démarrage. Vérifiez leur cible dans les propriétés Windows pour identifier le lanceur qui surveille déjà le port.
-2. Quittez l’ancien service avec son propre script `scripts\stop.ps1`. Conservez une copie du dossier `data/` et des anciens raccourcis. Si vous avez défini un `DATABASE_PATH` particulier, sauvegardez également cette base.
-3. Avant d’ouvrir la nouvelle application, copiez la base arrêtée et les réglages souhaités dans `%LOCALAPPDATA%\TwitchLiveAlert\data\`. Pour une base SQLite avec des fichiers `-wal` ou `-shm`, conservez l’ensemble cohérent. Si le profil cible existe, sauvegardez-le séparément avant de choisir les fichiers à reprendre.
-4. Au premier lancement, configurez les identifiants dans les réglages. Une migration administrée peut aussi appeler `twitch-live-alert.exe --import-credentials <profil>` depuis l’environnement de l’ancien service, sous le même compte Windows. Le profil désigne ici `%LOCALAPPDATA%\TwitchLiveAlert`. L’import valide les identifiants auprès de Twitch puis enregistre le fichier DPAPI du nouveau profil.
-5. Vérifiez la catégorie, la langue et l’historique dans le nouveau tableau de bord. Déplacez l’ancien raccourci du dossier Démarrage vers votre sauvegarde, puis activez le démarrage Windows de la version installée si vous le souhaitez. Les nouveaux scripts de développement créent leurs propres raccourcis `Twitch Live Alert.lnk`.
-
-Pour revenir à l’ancien moniteur, quittez le bureau, désactivez son démarrage automatique, puis restaurez le raccourci et démarrez l’ancien lanceur depuis son dépôt d’origine.
+La 0.3.0 convertit le filtre de la 0.2.0 en règle. Le guide de migration couvre aussi la reprise du journal du moniteur Bloodborne FR Live, les sauvegardes cohérentes et le retour à une version antérieure. [Migrer le profil Windows](MIGRATION.md)
 
 ## Tester une candidate
 

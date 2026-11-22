@@ -1,5 +1,7 @@
 # Contribuer à Twitch Live Alert
 
+[English](docs/en/CONTRIBUTING.md)
+
 ## Branches
 
 | Branche | Usage |
