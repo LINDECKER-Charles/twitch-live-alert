@@ -1,5 +1,15 @@
 # Distribution Windows
 
+## Télécharger la version 0.2.0
+
+[Télécharger l’installateur pour Windows 10 et 11 (x64)](https://github.com/LINDECKER-Charles/twitch-live-alert/releases/download/v0.2.0/Twitch-Live-Alert_0.2.0_x64-setup.exe)
+
+L’installateur est non signé. Pour vérifier le fichier, ouvrez PowerShell dans le dossier de téléchargement et comparez le résultat de la commande ci-dessous à l’empreinte SHA-256 publiée sur la [page de la version 0.2.0](https://github.com/LINDECKER-Charles/twitch-live-alert/releases/tag/v0.2.0).
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\Twitch-Live-Alert_0.2.0_x64-setup.exe
+```
+
 ## Fabriquer l’installeur
 
 Utilisez un hôte Windows avec Rust MSVC, les outils C++ de Visual Studio et le SDK Windows. La CI cible Windows x64 avec Rust 1.99.1. Le script utilise la CLI Cargo Tauri installée ou télécharge la CLI 2.12.0 avec `npx` si Node.js est disponible. Pour installer la version Cargo utilisée pour cette distribution, exécutez `cargo install tauri-cli --version 2.12.0 --locked`.
@@ -10,7 +20,7 @@ Utilisez un hôte Windows avec Rust MSVC, les outils C++ de Visual Studio et le 
 
 Le script compile `twitch-live-alert.exe` en profil release, le copie dans le répertoire de préparation Tauri avec le suffixe de la cible Rust, puis fabrique le paquet NSIS. Les deux binaires se trouvent côte à côte après installation. Rust, Node et le dépôt sont nécessaires uniquement à la construction. L’installeur télécharge le runtime Microsoft Edge WebView2 si Windows en a besoin. [Documentation Windows de Tauri](https://v2.tauri.app/distribute/windows-installer/)
 
-L’installeur x64 se trouve dans `src-tauri/target/release/bundle/nsis/` avec la configuration Cargo par défaut. Dans un dépôt public, la CI utilise les runners standard GitHub et teste le paquet dans l’espace temporaire du runner. Pour conserver l’installeur, construisez-le localement. [Parcours de contribution](../CONTRIBUTING.md)
+Après une construction locale, l’installeur x64 se trouve dans `src-tauri/target/release/bundle/nsis/` avec la configuration Cargo par défaut. La CI du dépôt public teste le paquet dans l’espace temporaire du runner. [Parcours de contribution](../CONTRIBUTING.md)
 
 ## Installer et utiliser
 

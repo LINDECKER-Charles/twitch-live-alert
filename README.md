@@ -8,8 +8,8 @@ Twitch Live Alert vous prévient sous Windows quand une chaîne passe en direct 
 
 ## Installer et commencer
 
-1. Munissez-vous du fichier `Twitch Live Alert_0.2.0_x64-setup.exe`. Pour le produire depuis le code source, lancez `.\scripts\build-desktop.ps1` sous Windows. [Prérequis et construction](docs/DISTRIBUTION.md)
-2. Lancez le fichier `-setup.exe`, puis ouvrez **Twitch Live Alert** depuis le menu Démarrer. Windows 10 ou 11 et Microsoft Edge WebView2 sont nécessaires à la fenêtre de bureau.
+1. [Téléchargez Twitch Live Alert 0.2.0 pour Windows x64](https://github.com/LINDECKER-Charles/twitch-live-alert/releases/download/v0.2.0/Twitch-Live-Alert_0.2.0_x64-setup.exe). L’installateur est non signé. Son empreinte SHA-256 figure sur la [page de la version](https://github.com/LINDECKER-Charles/twitch-live-alert/releases/tag/v0.2.0).
+2. Sous Windows 10 ou 11, lancez le fichier téléchargé, puis ouvrez **Twitch Live Alert** depuis le menu Démarrer. L’installateur télécharge Microsoft Edge WebView2 si nécessaire.
 3. Ouvrez **Connexion Twitch** et enregistrez les identifiants de votre propre application Twitch. La procédure de création figure ci-dessous.
 4. Dans **Réglages**, tapez quelques lettres du nom de la catégorie. Cliquez sur un résultat, ou utilisez les flèches et **Entrée**. Choisissez la langue, puis **Enregistrer les réglages**. Le premier filtre proposé est **Bloodborne · Français**. **Toutes les langues** permet de suivre toute la catégorie. [Aperçu de la recherche](docs/design/recherche-categories.png)
 5. Ouvrez **Directs** pour vérifier le dernier relevé. La commande de test des notifications permet aussi de vérifier que Windows accepte les alertes.
