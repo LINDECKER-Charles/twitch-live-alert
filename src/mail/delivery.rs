@@ -46,14 +46,18 @@ pub(super) fn diagnostic(reason: &str) -> (&'static str, &'static str) {
 }
 
 impl DeliveryStatus {
-    fn read(path: &Path, now: i64) -> anyhow::Result<Self> {
+    fn read(path: &Path, now: i64, eligible: Option<Vec<String>>) -> anyhow::Result<Self> {
         let mut db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         db.busy_timeout(Duration::from_secs(2))?;
         let tx = db.transaction()?;
+        let eligible = eligible
+            .map(|ids| serde_json::to_string(&ids))
+            .transpose()?;
         let mut status = tx.query_row(
             "SELECT count(*), count(*) FILTER(WHERE state='pending' AND attempts=0 AND next_attempt>?),
              count(*) FILTER(WHERE last_error IS NOT NULL), min(next_attempt)
-             FROM mail_batches WHERE state IN ('pending','sending')", [now],
+             FROM mail_batches WHERE state IN ('pending','sending') AND rule_id NOT IN (SELECT rule_id FROM mail_retired_rules)
+             AND (?2 IS NULL OR rule_id IN (SELECT value FROM json_each(?2)))", rusqlite::params![now,eligible],
             |r| Ok(Self { available:true,pending_count:r.get(0)?,scheduled_count:r.get(1)?,
                 failed_count:r.get(2)?,next_attempt_at:r.get(3)?,..Self::default() })
         )?;
@@ -61,7 +65,9 @@ impl DeliveryStatus {
             let last = tx.query_row(
                 "SELECT b.last_error,b.next_attempt,(SELECT e.rule_name FROM mail_events e WHERE e.batch_id=b.id ORDER BY rowid LIMIT 1)
                 FROM mail_batches b WHERE b.state IN ('pending','sending') AND b.last_error IS NOT NULL
-                ORDER BY b.failed_at DESC, b.rowid DESC LIMIT 1", [],
+                AND b.rule_id NOT IN (SELECT rule_id FROM mail_retired_rules)
+                AND (?1 IS NULL OR b.rule_id IN (SELECT value FROM json_each(?1)))
+                ORDER BY b.failed_at DESC, b.rowid DESC LIMIT 1", [eligible],
                 |r| Ok((r.get::<_,String>(0)?,r.get(1)?,r.get(2)?))
             ).optional()?;
             if let Some((reason, next, name)) = last {
@@ -81,9 +87,10 @@ pub(super) async fn get(State(service): State<MailService>) -> Json<DeliveryStat
     let Some(path) = service.database else {
         return Json(DeliveryStatus::default());
     };
+    let eligible = service.eligible.map(|ids| ids());
     Json(
         tokio::task::spawn_blocking(move || {
-            DeliveryStatus::read(&path, Utc::now().timestamp()).unwrap_or_default()
+            DeliveryStatus::read(&path, Utc::now().timestamp(), eligible).unwrap_or_default()
         })
         .await
         .unwrap_or_default(),

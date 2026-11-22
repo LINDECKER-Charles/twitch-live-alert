@@ -163,6 +163,7 @@ async fn saved_rules_edits_enable_disable_deletion_and_reopen_are_distinct_from_
 -> Result<()> {
     let dir = tempfile::tempdir()?;
     let p = dir.path().join("settings.json");
+    let _store = Store::open(&dir.path().join("db"))?;
     let srv = twitch_server().await;
     let (control, _) = Control::new(
         p.clone(),
@@ -331,5 +332,104 @@ fn a_failed_email_enqueue_rolls_back_first_scan_and_desktop_event() -> Result<()
     fixture.execute_batch("DROP TRIGGER fail_fixture")?;
     db.observe(&rule, &[stream], true, Utc::now())?;
     assert_eq!(db.pending_desktop(&rule.id)?.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn deleted_mail_is_reconciled_on_restart_and_paused_rules_keep_their_messages() -> Result<()>
+{
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use tower::ServiceExt;
+    async fn diagnostics(control: &Arc<Control>) -> Result<serde_json::Value> {
+        let request = Request::builder()
+            .uri("/api/mail/delivery")
+            .header("host", "127.0.0.1:37219")
+            .body(Body::empty())?;
+        let response = web::router(control.clone(), 37219).oneshot(request).await?;
+        Ok(serde_json::from_slice(
+            &to_bytes(response.into_body(), 4096).await?,
+        )?)
+    }
+    let dir = tempfile::tempdir()?;
+    let db = dir.path().join("db");
+    let config = dir.path().join("settings.json");
+    let mut removed = rule("removed");
+    removed.channels.email = true;
+    let mut paused = rule("paused");
+    paused.channels.email = true;
+    let settings = Settings {
+        rules: Some(vec![removed.clone(), paused.clone()]),
+        ..Settings::defaults(None)
+    };
+    settings.save(&config)?;
+    let store = Store::open_for_rules(&db, settings.rules.as_deref())?;
+    let conn = Connection::open(&db)?;
+    let seed = |rule: &Rule, id: &str| {
+        let mut stream: Stream = serde_json::from_value(stream_json())?;
+        stream.id = id.into();
+        crate::mail::enqueue(
+            &conn,
+            &rule.id,
+            &rule.name,
+            &rule.filter.category,
+            &stream,
+            &rule.mail,
+            Utc::now(),
+        )
+    };
+    for id in ["queued", "sent", "claimed"] {
+        seed(&removed, id)?;
+    }
+    seed(&paused, "waiting")?;
+    conn.execute("UPDATE mail_batches SET state='sent',sent_at=unixepoch() WHERE id=(SELECT batch_id FROM mail_events WHERE stream_id='sent')",[])?;
+    conn.execute("UPDATE mail_batches SET state='sending',attempts=1 WHERE id=(SELECT batch_id FROM mail_events WHERE stream_id='claimed')",[])?;
+    conn.execute("UPDATE mail_batches SET last_error='temporary',failed_at=unixepoch(),next_attempt=unixepoch()+300 WHERE state='pending'",[])?;
+    let (control, _) = Control::new(config.clone(), settings, None, Some(db.clone()));
+    control.delete_rule("removed").await.unwrap();
+    let active = diagnostics(&control).await?;
+    assert_eq!(active["pending_count"], 1);
+    assert_eq!(active["rule_name"], paused.name);
+    assert!(active["next_attempt_at"].is_number());
+    paused.enabled = false;
+    control.upsert_rule(paused.clone()).await.unwrap();
+    let inactive = diagnostics(&control).await?;
+    assert_eq!(inactive["available"], true);
+    assert_eq!(inactive["pending_count"], 0);
+    assert_eq!(inactive["failed_count"], 0);
+    assert!(inactive["next_attempt_at"].is_null() && inactive["last_error"].is_null());
+    // A poll already holding the deleted rule cannot re-create a delivery.
+    seed(&removed, "late")?;
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM mail_events WHERE stream_id IN ('late','queued')",
+            [],
+            |r| r.get::<_, i64>(0)
+        )?,
+        0
+    );
+    drop(store);
+    drop(control);
+    // Simulate a previous release interrupted after saving its updated rule list.
+    seed(&rule("formerly-deleted"), "orphan")?;
+    let saved = Settings::load(&config, Settings::defaults(None));
+    let restored = Store::open_for_rules(&db, saved.rules.as_deref())?;
+    assert_eq!(restored.recent_history()?.len(), 1);
+    assert_eq!(restored.recent_history()?[0].stream_id, "sent");
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM mail_events", [], |r| r
+            .get::<_, i64>(0))?,
+        2
+    );
+    let (reopened, _) = Control::new(config, saved, None, Some(db));
+    assert!(diagnostics(&reopened).await?["next_attempt_at"].is_null());
+    paused.enabled = true;
+    reopened.upsert_rule(paused).await.unwrap();
+    let resumed = diagnostics(&reopened).await?;
+    assert_eq!(resumed["pending_count"], 1);
+    assert_eq!(resumed["failed_count"], 1);
+    assert!(resumed["next_attempt_at"].is_number());
     Ok(())
 }

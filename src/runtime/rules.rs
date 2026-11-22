@@ -91,6 +91,11 @@ impl Control {
             .save(&self.settings_path)
             .map_err(|_| ControlError::Operation(SETTINGS_ERROR))?;
         self.apply(settings);
+        if let Some(path) = self.database_path.clone() {
+            let id = id.to_owned();
+            tokio::task::spawn_blocking(move ||crate::mail::retire_rule(&path,&id)).await.ok().and_then(Result::ok)
+                .ok_or(ControlError::Operation("La règle est supprimée. Le courrier en attente sera nettoyé à la prochaine ouverture de la base."))?;
+        }
         Ok(rules)
     }
 }

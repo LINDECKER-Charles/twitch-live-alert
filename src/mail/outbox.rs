@@ -26,7 +26,14 @@ pub fn migrate(db: &Connection) -> Result<()> {
             batch_id TEXT NOT NULL REFERENCES mail_batches(id), context TEXT NOT NULL,
             PRIMARY KEY(rule_id,stream_id)
         );
-        CREATE INDEX IF NOT EXISTS mail_members ON mail_events(batch_id);",
+        CREATE INDEX IF NOT EXISTS mail_members ON mail_events(batch_id);
+        CREATE TABLE IF NOT EXISTS mail_retired_rules(rule_id TEXT PRIMARY KEY);
+        CREATE TRIGGER IF NOT EXISTS discard_retired_mail_retry AFTER UPDATE OF state ON mail_batches
+        WHEN NEW.state='pending' AND EXISTS(SELECT 1 FROM mail_retired_rules WHERE rule_id=NEW.rule_id)
+        BEGIN
+            DELETE FROM mail_events WHERE batch_id=NEW.id;
+            DELETE FROM mail_batches WHERE id=NEW.id;
+        END;",
     )?;
     let has_time: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('mail_batches') WHERE name='failed_at')",
@@ -57,7 +64,7 @@ pub fn enqueue(
         return Ok(());
     }
     let exists: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM mail_events WHERE rule_id=? AND stream_id=?)",
+        "SELECT EXISTS(SELECT 1 FROM mail_events WHERE rule_id=?1 AND stream_id=?2 UNION ALL SELECT 1 FROM mail_retired_rules WHERE rule_id=?1)",
         params![rule_id, stream.id],
         |r| r.get(0),
     )?;
@@ -155,12 +162,53 @@ fn connect(path: &Path) -> Result<Connection> {
     Ok(db)
 }
 
+/// Purge only unsent messages for retired rules. During normal operation an SMTP
+/// submission keeps its lease until it finishes. At startup the Store owns the
+/// exclusive profile lock, so no lease from the previous process is still active.
+fn purge_retired(tx: &rusqlite::Transaction<'_>, startup: bool) -> Result<()> {
+    const RETIRED: &str = "rule_id IN (SELECT rule_id FROM mail_retired_rules)
+        AND (state='pending' OR (?1 AND state='sending'))";
+    tx.execute(&format!("DELETE FROM mail_events WHERE batch_id IN (SELECT id FROM mail_batches WHERE {RETIRED})"),[startup])?;
+    tx.execute(
+        &format!("DELETE FROM mail_batches WHERE {RETIRED}"),
+        [startup],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn retire_rule(path: &Path, id: &str) -> Result<()> {
+    let mut db = connect(path)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute("INSERT OR IGNORE INTO mail_retired_rules VALUES(?1)", [id])?;
+    purge_retired(&tx, false)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub(crate) fn reconcile_rules(db: &mut Connection, known: Option<Vec<&str>>) -> Result<()> {
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if let Some(known) = known {
+        // Only an explicit, successfully loaded list can retire previously unknown
+        // rules. A missing or invalid settings file falls back to the legacy rule.
+        let known = serde_json::to_string(&known)?;
+        tx.execute(
+            "DELETE FROM mail_retired_rules WHERE rule_id IN (SELECT value FROM json_each(?1))",
+            [&known],
+        )?;
+        tx.execute("INSERT OR IGNORE INTO mail_retired_rules SELECT DISTINCT rule_id FROM mail_batches
+            WHERE state IN ('pending','sending') AND rule_id NOT IN (SELECT value FROM json_each(?1))",[known])?;
+    }
+    purge_retired(&tx, true)?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn claim(path: &Path, now: DateTime<Utc>, rules: &[String]) -> Result<Claim> {
     let mut db = connect(path)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let row = tx.query_row(
         "SELECT id,policy,attempts FROM mail_batches WHERE state IN ('pending','sending')
-        AND next_attempt <= ? AND rule_id IN (SELECT value FROM json_each(?)) ORDER BY next_attempt,rowid LIMIT 1",
+        AND rule_id NOT IN (SELECT rule_id FROM mail_retired_rules) AND next_attempt <= ? AND rule_id IN (SELECT value FROM json_each(?)) ORDER BY next_attempt,rowid LIMIT 1",
         params![now.timestamp(),serde_json::to_string(rules)?],
         |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,u32>(2)?))
     ).optional()?;

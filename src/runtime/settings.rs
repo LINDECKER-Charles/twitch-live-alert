@@ -67,6 +67,17 @@ impl Settings {
             .unwrap_or_else(|| vec![Rule::legacy(self.preferences.filter.clone())])
     }
 
+    pub(super) fn active_mail_ids(&self) -> Vec<String> {
+        if !self.enabled || self.disconnected {
+            return Vec::new();
+        }
+        self.rules()
+            .into_iter()
+            .filter(|r| r.enabled && r.channels.email)
+            .map(|r| r.id)
+            .collect()
+    }
+
     pub(super) fn active_count(&self) -> usize {
         self.rules
             .as_deref()

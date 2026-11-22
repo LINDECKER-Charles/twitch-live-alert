@@ -9,6 +9,7 @@ mod transport;
 use crate::schedule::{Schedule, time};
 use anyhow::{Result, ensure};
 pub use outbox::{enqueue, migrate};
+pub(crate) use outbox::{reconcile_rules, retire_rule};
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -63,6 +64,7 @@ pub struct MailService {
     test_ca: Option<lettre::transport::smtp::client::Certificate>,
     profile: PathBuf,
     database: Option<PathBuf>,
+    eligible: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
     changes: Arc<Mutex<()>>,
 }
 
@@ -73,12 +75,21 @@ impl MailService {
             test_ca: None,
             profile: profile_dir,
             database: None,
+            eligible: None,
             changes: Arc::new(Mutex::new(())),
         }
     }
 
     pub fn with_database(mut self, path: Option<PathBuf>) -> Self {
         self.database = path;
+        self
+    }
+
+    pub(crate) fn with_eligibility(
+        mut self,
+        ids: impl Fn() -> Vec<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.eligible = Some(Arc::new(ids));
         self
     }
 

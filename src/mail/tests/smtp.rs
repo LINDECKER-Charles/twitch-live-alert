@@ -27,6 +27,14 @@ async fn server(
     starttls: bool,
     accept_messages: Vec<bool>,
 ) -> Result<(u16, Certificate, JoinHandle<Vec<String>>)> {
+    server_during_data(starttls, accept_messages, || {}).await
+}
+
+async fn server_during_data(
+    starttls: bool,
+    accept_messages: Vec<bool>,
+    mut during_data: impl FnMut() + Send + 'static,
+) -> Result<(u16, Certificate, JoinHandle<Vec<String>>)> {
     let key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])?;
     let cert = key.cert.der().clone();
     let root = Certificate::from_der(cert.to_vec())?;
@@ -82,6 +90,7 @@ async fn server(
                 message.push_str(&value);
             }
             contents.push(message);
+            during_data();
             reply(
                 &mut io,
                 if accepted {
@@ -334,6 +343,66 @@ async fn reboot_respects_expired_leases_window_limits_and_concurrent_claims() ->
             |r| r.get::<_, i64>(0)
         )?,
         2
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn deletion_during_smtp_preserves_accepted_mail_and_discards_refused_mail() -> Result<()> {
+    let dir = TempDir::new()?;
+    let db_path = dir.path().join("outbox.sqlite");
+    let db = Connection::open(&db_path)?;
+    migrate(&db)?;
+    let mut names = ["accept", "refuse"].into_iter();
+    let during = db_path.clone();
+    let (port, certificate, sink) = server_during_data(false, vec![true, false], move || {
+        super::super::retire_rule(&during, names.next().unwrap()).unwrap();
+    })
+    .await?;
+    let mut service = MailService::new(dir.path().into());
+    service.test_ca = Some(certificate);
+    let app = service.router();
+    assert_eq!(
+        request(&app, "POST", "/api/mail", configuration(port, "tls"))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let now = Utc::now();
+    for id in ["accept", "refuse"] {
+        enqueue(
+            &db,
+            id,
+            id,
+            "Catégorie",
+            &stream(id),
+            &MailPolicy::default(),
+            now,
+        )?;
+        assert!(
+            service
+                .dispatch_next(&db_path, now, &[id.to_string()])
+                .await?
+        );
+    }
+    assert_eq!(sink.await?.len(), 2);
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM mail_batches", [], |r| r
+            .get::<_, i64>(0))?,
+        1
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT rule_id FROM mail_batches WHERE state='sent'",
+            [],
+            |r| r.get::<_, String>(0)
+        )?,
+        "accept"
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM mail_events", [], |r| r
+            .get::<_, i64>(0))?,
+        1
     );
     Ok(())
 }
