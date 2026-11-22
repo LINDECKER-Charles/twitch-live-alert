@@ -1,8 +1,7 @@
 import { cover, createCategoryPicker } from "./category-picker.js";
 import { emptyState, icon } from "./lists.js";
-import { addDigestTime, scheduleEditor } from "./schedules.js";
+import { addDigestTime, inDetectionWindow, scheduleEditor, scheduleSummary } from "./schedules.js";
 
-const modeNames = { instant: "Immédiat", window: "Plages autorisées", digest: "Récapitulatif" };
 const freshSchedule = () => ({ timezone: "local", windows: [] });
 function freshRule() {
   return { name: "", category: "", language: "fr", enabled: true, channels: { desktop: true, email: false },
@@ -100,6 +99,39 @@ export function createRules(id, request, say, langName, refreshStatus) {
     id("new-rule").focus();
   }
 
+  function calendarLine(title, value) {
+    const line = document.createElement("div");
+    const term = document.createElement("dt");
+    term.textContent = title;
+    const detail = document.createElement("dd");
+    if (value.details) {
+      const disclosure = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = value.short;
+      summary.title = "Afficher tous les horaires";
+      const full = document.createElement("ul");
+      for (const label of value.details) {
+        const li = document.createElement("li");
+        li.textContent = label;
+        full.append(li);
+      }
+      disclosure.append(summary, full);
+      detail.append(disclosure);
+    } else detail.textContent = value.short;
+    line.append(term, detail);
+    return line;
+  }
+
+  function updateTime(row, rule) {
+    const marker = row.querySelector(".window-state");
+    const current = rule.enabled && rule.detection.windows.length ? inDetectionWindow(rule.detection) : null;
+    marker.hidden = current === null;
+    if (current === null) return;
+    const label = current ? "Dans la plage de détection" : "Hors plage de détection";
+    if (marker.lastChild.textContent !== label) marker.lastChild.textContent = label;
+    marker.dataset.tone = current ? "" : "warn";
+  }
+
   function row(rule) {
     const item = document.createElement("li");
     item.className = "rule-row";
@@ -111,9 +143,9 @@ export function createRules(id, request, say, langName, refreshStatus) {
     const details = document.createElement("div");
     details.className = "rule-details";
     const tags = [
-      [rule.enabled ? "check" : "pause", rule.enabled ? "Active" : "En pause", rule.enabled ? "good" : ""],
+      [rule.enabled ? "check" : "pause", rule.enabled ? "Activée" : "Désactivée", rule.enabled ? "good" : ""],
       ...(rule.channels.desktop ? [["screen", "Windows"]] : []),
-      ...(rule.channels.email ? [["mail", modeNames[rule.mail.mode]]] : []),
+      ...(rule.channels.email ? [["mail", "Courriel"]] : []),
     ];
     for (const [symbol, label, tone] of tags) {
       const tag = document.createElement("span");
@@ -122,7 +154,16 @@ export function createRules(id, request, say, langName, refreshStatus) {
       tag.append(icon(symbol), document.createTextNode(label));
       details.append(tag);
     }
-    main.append(name, line, details);
+    const windowState = document.createElement("span");
+    windowState.className = "rule-detail window-state";
+    windowState.append(icon("clock"), document.createTextNode(""));
+    details.append(windowState);
+    const calendars = document.createElement("dl");
+    calendars.className = "rule-calendars";
+    calendars.append(calendarLine("Détection", scheduleSummary(rule.detection)));
+    calendars.append(calendarLine("Courriel", rule.channels.email ?
+      scheduleSummary(rule.mail.schedule, rule.mail.mode, rule.mail.digest_times) : { short: "Désactivé" }));
+    main.append(name, line, details, calendars);
     const actions = document.createElement("div");
     actions.className = "inline-actions row-actions";
     if (confirmId === rule.id) {
@@ -139,6 +180,7 @@ export function createRules(id, request, say, langName, refreshStatus) {
     }
     item.dataset.rule = rule.id;
     item.append(cover(rule), main, actions);
+    updateTime(item, rule);
     return item;
   }
 
@@ -216,5 +258,10 @@ export function createRules(id, request, say, langName, refreshStatus) {
   id("mail-mode").onchange = showPolicy;
   id("add-time").onclick = () => addDigestTime(id("digest-times")).focus();
   return { load, closePicker: picker.close,
-    setContext(online, hasTwitch) { available = online; configured = hasTwitch; controls(); } };
+    setContext(online, hasTwitch) {
+      available = online; configured = hasTwitch; controls();
+      if (rules && !id("title-regles").closest("[data-page]").hidden && form.hidden) {
+        [...list.children].forEach((item, i) => updateTime(item, rules[i]));
+      }
+    } };
 }
