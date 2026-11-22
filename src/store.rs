@@ -1,3 +1,4 @@
+use crate::rules::{LEGACY_ID, LEGACY_NAME, Rule};
 use crate::twitch::{Stream, StreamFilter};
 use anyhow::{Context, Result, bail};
 use fs2::FileExt;
@@ -16,6 +17,9 @@ pub struct Store {
 
 #[derive(Clone, Serialize)]
 pub struct Delivery {
+    pub rule_id: String,
+    pub rule_name: String,
+    pub channel: String,
     pub stream_id: String,
     pub user_name: String,
     pub title: String,
@@ -45,10 +49,11 @@ impl Store {
             .context("Impossible d'ouvrir le verrou de la base")?;
         lock.try_lock_exclusive()
             .context("Une autre instance utilise déjà cette base de données")?;
-        let connection = Connection::open(path).context("Impossible d'ouvrir la base SQLite")?;
+        let mut connection =
+            Connection::open(path).context("Impossible d'ouvrir la base SQLite")?;
         connection.busy_timeout(Duration::from_secs(5))?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 3 {
+        if version > 4 {
             bail!("Version de base SQLite plus récente que ce service");
         }
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
@@ -88,6 +93,30 @@ impl Store {
                  COMMIT;"
             ).context("Impossible de migrer les filtres de surveillance")?;
         }
+        if version < 4 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(
+                "CREATE TABLE desktop_events (
+                    rule_id TEXT NOT NULL, stream_id TEXT NOT NULL, rule_name TEXT NOT NULL,
+                    user_name TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
+                    snapshot TEXT, sent_at INTEGER,
+                    PRIMARY KEY(rule_id, stream_id));
+                 CREATE INDEX desktop_history ON desktop_events(sent_at DESC);
+                 CREATE INDEX desktop_pending ON desktop_events(rule_id) WHERE sent_at IS NULL;",
+            )?;
+            tx.execute(
+                "INSERT INTO desktop_events(rule_id,stream_id,rule_name,user_name,title,url,sent_at)
+                 SELECT ?1,stream_id,?2,coalesce(user_name,'Chaîne inconnue'),coalesce(title,''),coalesce(url,''),recorded_at
+                 FROM deliveries WHERE disposition='sent' ORDER BY rowid", params![LEGACY_ID, LEGACY_NAME])?;
+            crate::mail::migrate(&tx)?;
+            tx.execute_batch("CREATE VIEW alert_history AS
+                SELECT rule_id, rule_name, 'desktop' channel, stream_id,user_name,title,url,sent_at recorded_at,rowid tie
+                FROM desktop_events WHERE sent_at IS NOT NULL
+                UNION ALL SELECT e.rule_id,e.rule_name,'email',e.stream_id,e.user_name,e.title,e.url,b.sent_at,e.rowid
+                FROM mail_events e JOIN mail_batches b ON e.batch_id=b.id WHERE b.state='sent';")?;
+            tx.pragma_update(None, "user_version", 4)?;
+            tx.commit()?;
+        }
         Ok(Self {
             connection,
             _lock: lock,
@@ -100,50 +129,117 @@ impl Store {
         streams: &[Stream],
         notify_existing: bool,
     ) -> Result<()> {
-        let key = filter.baseline_key();
-        let initialized: bool = self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM metadata WHERE key=?1)",
-            [&key],
-            |row| row.get(0),
-        )?;
-        if initialized {
-            return Ok(());
-        }
+        self.initialize_rule(&Rule::legacy(filter.clone()), streams, notify_existing)
+    }
+
+    pub(crate) fn initialize_rule(
+        &mut self,
+        rule: &Rule,
+        streams: &[Stream],
+        notify_existing: bool,
+    ) -> Result<()> {
+        let key = rule.baseline_key();
         let transaction = self.connection.transaction()?;
-        if !notify_existing {
+        if transaction.execute(
+            "INSERT OR IGNORE INTO metadata(key,value) VALUES (?1,'true')",
+            [&key],
+        )? > 0
+            && !notify_existing
+        {
+            let mut insert = transaction
+                .prepare("INSERT OR IGNORE INTO baselines(filter_key,stream_id) VALUES (?1,?2)")?;
             for stream in streams {
-                transaction.execute(
-                    "INSERT OR IGNORE INTO baselines(filter_key, stream_id) VALUES (?1, ?2)",
-                    params![key, stream.id],
-                )?;
+                insert.execute(params![key, stream.id])?;
             }
         }
-        transaction.execute("INSERT INTO metadata(key,value) VALUES (?1,'true')", [&key])?;
         transaction.commit()?;
         Ok(())
     }
 
     pub fn contains(&self, stream_id: &str, filter: &StreamFilter) -> Result<bool> {
-        Ok(self
-            .connection
-            .query_row(
-                "SELECT 1 FROM deliveries WHERE stream_id=?1
-                 UNION ALL SELECT 1 FROM baselines WHERE stream_id=?1 AND filter_key=?2 LIMIT 1",
-                params![stream_id, filter.baseline_key()],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some())
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM desktop_events WHERE rule_id=?1 AND stream_id=?2 AND sent_at IS NOT NULL
+             UNION ALL SELECT 1 FROM baselines WHERE filter_key=?3 AND stream_id=?2)",
+            params![LEGACY_ID, stream_id, filter.baseline_key()], |r| r.get(0))?)
     }
 
     pub fn mark_sent(&self, stream: &Stream) -> Result<()> {
-        self.connection
-            .execute(
-                "INSERT INTO deliveries(stream_id, disposition, user_name, title, url)
-             VALUES (?1, 'sent', ?2, ?3, ?4)",
-                params![stream.id, stream.user_name, stream.title, stream.url()],
-            )
-            .context("Windows a accepté la notification, mais SQLite n'a pas pu l'enregistrer")?;
+        self.connection.execute(
+            "INSERT INTO desktop_events(rule_id,stream_id,rule_name,user_name,title,url,sent_at)
+             VALUES (?1,?2,?3,?4,?5,?6,unixepoch())",
+            params![
+                LEGACY_ID,
+                stream.id,
+                LEGACY_NAME,
+                stream.user_name,
+                stream.title,
+                stream.url()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn queue(
+        &mut self,
+        rule: &Rule,
+        streams: &[Stream],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        let key = rule.baseline_key();
+        let tx = self.connection.transaction()?;
+        {
+            let mut baseline =
+                tx.prepare("SELECT 1 FROM baselines WHERE filter_key=?1 AND stream_id=?2")?;
+            let mut insert = tx.prepare("INSERT OR IGNORE INTO desktop_events(rule_id,stream_id,rule_name,user_name,title,url,snapshot)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)")?;
+            for stream in streams {
+                if baseline
+                    .query_row(params![key, stream.id], |_| Ok(()))
+                    .optional()?
+                    .is_some()
+                {
+                    continue;
+                }
+                if rule.channels.desktop {
+                    insert.execute(params![
+                        rule.id,
+                        stream.id,
+                        rule.name,
+                        stream.user_name,
+                        stream.title,
+                        stream.url(),
+                        serde_json::to_string(stream)?
+                    ])?;
+                }
+                if rule.channels.email {
+                    crate::mail::enqueue(
+                        &tx,
+                        &rule.id,
+                        &rule.name,
+                        &rule.filter.category,
+                        stream,
+                        &rule.mail,
+                        now,
+                    )?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn pending_desktop(&self, rule_id: &str) -> Result<Vec<(String, Stream)>> {
+        let mut stmt = self.connection.prepare("SELECT rule_name,snapshot FROM desktop_events WHERE rule_id=?1 AND sent_at IS NULL ORDER BY rowid LIMIT 100")?;
+        let rows = stmt.query_map([rule_id], |r| Ok((r.get(0)?, r.get::<_, String>(1)?)))?;
+        rows.map(|row| {
+            let (name, json) = row?;
+            Ok((name, serde_json::from_str(&json)?))
+        })
+        .collect()
+    }
+
+    pub(crate) fn confirm_desktop(&self, rule_id: &str, stream_id: &str) -> Result<()> {
+        self.connection.execute("UPDATE desktop_events SET sent_at=unixepoch(),snapshot=NULL WHERE rule_id=?1 AND stream_id=?2 AND sent_at IS NULL", params![rule_id,stream_id])?;
         Ok(())
     }
 
@@ -164,7 +260,7 @@ impl Store {
         let query = query.trim().to_lowercase();
         let total: i64 = transaction.query_row(
             &format!(
-                "SELECT count(*) FROM deliveries WHERE disposition='sent' {}",
+                "SELECT count(*) FROM alert_history WHERE 1=1 {}",
                 history_filter(&query)
             ),
             rusqlite::params_from_iter((!query.is_empty()).then_some(&query)),
@@ -183,7 +279,7 @@ fn history_filter(query: &str) -> &'static str {
     if query.is_empty() {
         ""
     } else {
-        "AND (instr(unicode_lower(coalesce(user_name,'Chaîne inconnue')), ?1) > 0 OR instr(unicode_lower(coalesce(title,'')), ?1) > 0 OR instr(unicode_lower(substr(coalesce(url,''), length('https://www.twitch.tv/') + 1)), ?1) > 0)"
+        "AND (instr(unicode_lower(rule_name), ?1) > 0 OR instr(unicode_lower(coalesce(user_name,'Chaîne inconnue')), ?1) > 0 OR instr(unicode_lower(coalesce(title,'')), ?1) > 0 OR instr(unicode_lower(substr(coalesce(url,''), length('https://www.twitch.tv/') + 1)), ?1) > 0)"
     }
 }
 
@@ -194,13 +290,17 @@ fn history_items(
     limit: u32,
 ) -> Result<Vec<Delivery>> {
     let sql = format!(
-        "SELECT stream_id, coalesce(user_name, 'Chaîne inconnue'), coalesce(title,''), coalesce(url,''), recorded_at
-         FROM deliveries WHERE disposition='sent' {}
-         ORDER BY recorded_at DESC, rowid DESC LIMIT ?2 OFFSET ?3", history_filter(query)
+        "SELECT stream_id,user_name,title,url,recorded_at,rule_id,rule_name,channel
+         FROM alert_history WHERE 1=1 {}
+         ORDER BY recorded_at DESC, tie DESC, channel, rule_id, stream_id LIMIT ?2 OFFSET ?3",
+        history_filter(query)
     );
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(params![query, limit, offset], |row| {
         Ok(Delivery {
+            rule_id: row.get(5)?,
+            rule_name: row.get(6)?,
+            channel: row.get(7)?,
             stream_id: row.get(0)?,
             user_name: row.get(1)?,
             title: row.get(2)?,
