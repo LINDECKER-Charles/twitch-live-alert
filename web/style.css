@@ -354,3 +354,16 @@ body:has(dialog[open]) { overflow: hidden; }
 .delivery-panel #delivery-next { color: var(--dim); }
 button.variable { display: inline-flex; flex-wrap: wrap; gap: 4px 7px; }
 button.variable span { font: 12px/1.4 var(--font); color: var(--muted); }
+
+.rule-detail[data-tone="warn"] { color: var(--warn); }
+.rule-calendars { display: grid; gap: 2px; margin-top: 9px; font-size: 12px; line-height: 1.5; }
+.rule-calendars > div { display: grid; grid-template-columns: 64px minmax(0,1fr); gap: 6px; }
+.rule-calendars dt { color: var(--dim); }
+.rule-calendars dd { color: var(--muted); overflow-wrap: anywhere; }
+.rule-calendars summary { color: var(--accent); cursor: pointer; }
+.rule-calendars ul { padding: 4px 0 4px 15px; }
+.rule-row > .cover { align-self: start; }
+@media (max-width: 540px) {
+  .rule-calendars > div { grid-template-columns: 55px minmax(0,1fr); gap: 4px; }
+  .rule-calendars summary { min-height: 26px; }
+}

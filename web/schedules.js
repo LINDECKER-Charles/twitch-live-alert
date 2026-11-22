@@ -56,7 +56,7 @@ export function scheduleEditor(host) {
   function explain() {
     hint.textContent = !rows.childElementCount
       ? (digest ? "Tous les jours, aux heures choisies." : "Tous les jours, à toute heure.")
-      : "Une plage qui franchit minuit commence le jour coché. Deux heures identiques couvrent 24 heures.";
+      : "Une plage qui franchit minuit commence le jour coché. Deux heures identiques couvrent toute la journée cochée.";
     add.textContent = "Ajouter une plage";
     add.hidden = digest && rows.childElementCount === 1 && rows.firstElementChild.querySelector(".time-line")?.hidden;
     if (add.hidden) hint.textContent = "Le récapitulatif est envoyé les jours cochés, aux heures choisies.";
@@ -124,4 +124,63 @@ export function scheduleEditor(host) {
       return { timezone: zone.value, windows };
     },
   };
+}
+
+const formatters = new Map();
+const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+export function inDetectionWindow(schedule, now = new Date()) {
+  if (!Array.isArray(schedule?.windows)) return null;
+  if (!schedule.windows.length) return true;
+  try {
+    const zone = schedule.timezone;
+    if (!formatters.has(zone)) formatters.set(zone, new Intl.DateTimeFormat("en-GB", {
+      timeZone: zone === "local" ? undefined : zone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }));
+    const parts = Object.fromEntries(formatters.get(zone).formatToParts(now).map(p => [p.type, p.value]));
+    const day = weekdays.indexOf(parts.weekday) + 1;
+    if (!day) return null;
+    const previous = day === 1 ? 7 : day - 1;
+    const clock = parts.hour + ":" + parts.minute;
+    return schedule.windows.some(({ days: allowed, start, end }) => {
+      if (start === end) return allowed.includes(day);
+      if (start < end) return allowed.includes(day) && start <= clock && clock < end;
+      return (allowed.includes(day) && start <= clock) || (allowed.includes(previous) && clock < end);
+    });
+  } catch { return null; }
+}
+
+function dayLabel(values) {
+  const list = [...new Set(values)].sort((a, b) => a - b);
+  if (list.length === 7) return "Tous les jours";
+  const name = value => days[value - 1].slice(0, 3) + ".";
+  const ranges = [];
+  for (let i = 0; i < list.length; i++) {
+    const first = list[i];
+    while (i + 1 < list.length && list[i + 1] === list[i] + 1) i++;
+    ranges.push(first === list[i] ? name(first) : name(first) + "–" + name(list[i]));
+  }
+  return ranges.join(", ");
+}
+
+function windowLabel(window, daysOnly) {
+  const when = dayLabel(window.days);
+  if (window.start === window.end) return when + (daysOnly ? "" : " toute la journée");
+  return when + " " + window.start + "–" + window.end + (window.start > window.end ? " (+1 j)" : "");
+}
+
+export function scheduleSummary(schedule, mode = "detection", times = []) {
+  if (mode === "instant") return { short: "Immédiat" };
+  const zone = schedule.timezone === "local" ? "heure du PC" : schedule.timezone;
+  const digest = mode === "digest";
+  const prefix = mode === "window" ? "Plages · " : "";
+  if (!schedule.windows.length && !digest) return { short: prefix + "En continu" };
+  const labels = schedule.windows.map(window => windowLabel(window, digest));
+  if (!labels.length) labels.push("Tous les jours");
+  const sorted = [...new Set(times)].sort();
+  const shortTimes = digest ? "Récap. " + sorted.slice(0, 2).join(", ") + (sorted.length > 2 ? " +" + (sorted.length - 2) : "") + " · " : "";
+  const short = prefix + shortTimes + labels[0] + (labels.length > 1 ? " +" + (labels.length - 1) : "") + " · " + zone;
+  if (labels.length === 1 && (!digest || sorted.length <= 2)) return { short };
+  const details = digest ? ["Récapitulatif à " + sorted.join(", ") + " · " + zone, ...labels] : labels.map(label => label + " · " + zone);
+  return { short, details };
 }
