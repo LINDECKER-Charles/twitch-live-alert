@@ -128,6 +128,15 @@ impl Store {
         })
     }
 
+    pub(crate) fn open_for_rules(path: &Path, known: Option<&[Rule]>) -> Result<Self> {
+        let mut store = Self::open(path)?;
+        crate::mail::reconcile_rules(
+            &mut store.connection,
+            known.map(|rules| rules.iter().map(|r| r.id.as_str()).collect()),
+        )?;
+        Ok(store)
+    }
+
     pub fn initialize(
         &mut self,
         filter: &StreamFilter,

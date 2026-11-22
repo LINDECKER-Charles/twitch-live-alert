@@ -134,7 +134,7 @@ impl Control {
         let configured = twitch.is_some();
         let worker_available = database_path.is_some();
         let (twitch, _) = watch::channel(twitch);
-        let (settings_sender, _) = watch::channel(settings.clone());
+        let (settings_sender, mail_settings) = watch::channel(settings.clone());
         let (shutdown, _) = watch::channel(false);
         let (checks, check_receiver) = mpsc::channel(1);
         let control = Self {
@@ -145,7 +145,8 @@ impl Control {
                     .unwrap_or_else(|| Path::new("data"))
                     .to_path_buf(),
             )
-            .with_database(database_path.clone()),
+            .with_database(database_path.clone())
+            .with_eligibility(move || mail_settings.borrow().active_mail_ids()),
             status: Mutex::new(Status {
                 app_id: "twitch-live-alert",
                 process_id: std::process::id(),
@@ -473,7 +474,8 @@ pub async fn serve(
         || PathBuf::from("data/alerts.sqlite3"),
         |config| config.database_path.clone(),
     );
-    let store = Store::open(&database_path).and_then(|store| Ok((store.recent_history()?, store)));
+    let store = Store::open_for_rules(&database_path, settings.rules.as_deref())
+        .and_then(|store| Ok((store.recent_history()?, store)));
     let twitch = config
         .ok()
         .map(|config| {
@@ -554,7 +556,7 @@ pub async fn watch_in_terminal(
     let mut settings = Settings::load(Path::new(SETTINGS_PATH), Settings::defaults(Some(&config)));
     // --no-web is an explicit command to start watching from the terminal.
     settings.enabled = true;
-    let store = Store::open(&config.database_path)?;
+    let store = Store::open_for_rules(&config.database_path, settings.rules.as_deref())?;
     let twitch = Twitch::new(http::client()?, config.client_id, config.client_secret);
     let (control, receiver) = Control::new(
         PathBuf::from(SETTINGS_PATH),

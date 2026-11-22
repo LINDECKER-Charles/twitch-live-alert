@@ -53,18 +53,10 @@ pub(super) async fn run_services(
 
 async fn drain_mail(control: &Control, path: &Path) -> Result<()> {
     for _ in 0..8 {
-        let ids: Vec<_> = {
-            let current = control.settings.borrow();
-            if !current.enabled || current.disconnected || *control.shutdown.borrow() {
-                return Ok(());
-            }
-            current
-                .rules()
-                .into_iter()
-                .filter(|r| r.enabled && r.channels.email)
-                .map(|r| r.id)
-                .collect()
-        };
+        if *control.shutdown.borrow() {
+            return Ok(());
+        }
+        let ids = control.settings.borrow().active_mail_ids();
         if ids.is_empty()
             || !control
                 .mail
@@ -104,7 +96,7 @@ pub async fn check_once(config: Config, dry_run: bool) -> Result<()> {
         }
         return Ok(());
     }
-    let mut store = Store::open(&config.database_path)?;
+    let mut store = Store::open_for_rules(&config.database_path, settings.rules.as_deref())?;
     let (_sender, mut cancel) = watch::channel(false);
     let mut poller = poll::Poller {
         store: &mut store,
