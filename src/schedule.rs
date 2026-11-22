@@ -1,6 +1,6 @@
 use anyhow::{Result, bail, ensure};
 use chrono::{
-    DateTime, Datelike, Duration, Local, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc,
+    DateTime, Datelike, Duration, Local, LocalResult, NaiveDateTime, NaiveTime, TimeZone, Utc,
 };
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
@@ -57,17 +57,55 @@ impl Zone {
         }
     }
 
-    fn first(&self, wall: NaiveDateTime) -> Option<DateTime<Utc>> {
+    fn resolve(&self, wall: NaiveDateTime) -> LocalResult<DateTime<Utc>> {
         match self.0 {
-            Some(zone) => zone
-                .from_local_datetime(&wall)
-                .earliest()
-                .map(|t| t.to_utc()),
-            None => Local
-                .from_local_datetime(&wall)
-                .earliest()
-                .map(|t| t.to_utc()),
+            Some(zone) => zone.from_local_datetime(&wall).map(|t| t.to_utc()),
+            None => Local.from_local_datetime(&wall).map(|t| t.to_utc()),
         }
+    }
+
+    fn opening(
+        &self,
+        mut start: NaiveDateTime,
+        end: NaiveDateTime,
+        now: DateTime<Utc>,
+    ) -> Option<DateTime<Utc>> {
+        // If the clock skipped the start, take the first representable local
+        // minute inside this particular window, or skip the window altogether.
+        let edges = loop {
+            if start >= end {
+                return None;
+            }
+            let mapped = self.resolve(start);
+            if mapped != LocalResult::None {
+                break mapped;
+            }
+            start += Duration::minutes(1);
+        };
+        let mut next = [edges.earliest(), edges.latest()]
+            .into_iter()
+            .flatten()
+            .filter(|t| *t >= now)
+            .min();
+        let last = end - Duration::minutes(1);
+        if matches!(edges, LocalResult::Single(_))
+            && matches!(self.resolve(last), LocalResult::Ambiguous(_, _))
+        {
+            // A fall-back can reopen a window which started before the fold and
+            // ended partway through it. Find the beginning of the repeated hour.
+            let (mut lo, mut hi) = (start, last);
+            while (hi - lo).num_minutes() > 1 {
+                let mid = lo + Duration::minutes((hi - lo).num_minutes() / 2);
+                if matches!(self.resolve(mid), LocalResult::Ambiguous(_, _)) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            let second = self.resolve(hi).latest().filter(|t| *t >= now);
+            next = next.into_iter().chain(second).min();
+        }
+        next
     }
 }
 
@@ -123,14 +161,37 @@ impl Schedule {
         if self.allows_wall(wall) {
             return Ok(now);
         }
-        // Step through actual UTC minutes, including both occurrences of a folded
-        // local hour and skipping the nonexistent minutes of a spring transition.
-        let mut minute = now.with_second(0).unwrap().with_nanosecond(0).unwrap();
-        for _ in 0..(15 * 24 * 60) {
-            minute += Duration::minutes(1);
-            if self.allows_wall(zone.wall(minute)) {
-                return Ok(minute);
+        let windows = self
+            .windows
+            .iter()
+            .map(|w| Ok((&w.days, time(&w.start)?, time(&w.end)?)))
+            .collect::<Result<Vec<_>>>()?;
+        let mut earliest = None;
+        for offset in -1..15 {
+            let date = wall.date() + Duration::days(offset);
+            if earliest.is_some_and(|utc| date > zone.wall(utc).date()) {
+                break;
             }
+            let day = date.weekday().number_from_monday() as u8;
+            for &(days, start, end) in &windows {
+                if !days.contains(&day) {
+                    continue;
+                }
+                let (from, to) = if start == end {
+                    let midnight = date.and_time(NaiveTime::MIN);
+                    (midnight, midnight + Duration::days(1))
+                } else {
+                    (
+                        date.and_time(start),
+                        date.and_time(end) + Duration::days(i64::from(start > end)),
+                    )
+                };
+                let next = zone.opening(from, to, now);
+                earliest = earliest.into_iter().chain(next).min();
+            }
+        }
+        if let Some(next) = earliest {
+            return Ok(next);
         }
         bail!("Aucune ouverture de plage horaire.")
     }
@@ -155,7 +216,7 @@ impl Schedule {
                 // A skipped hour moves to the first possible minute that day.
                 // A repeated hour has only one scheduled digest (earliest offset).
                 let candidate = loop {
-                    if let Some(value) = zone.first(wall) {
+                    if let Some(value) = zone.resolve(wall).earliest() {
                         break Some(value);
                     }
                     wall += Duration::minutes(1);

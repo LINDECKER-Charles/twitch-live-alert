@@ -282,8 +282,7 @@ async fn a_desktop_delivery_pending_at_shutdown_survives_an_offline_stream() -> 
     let stream: Stream = serde_json::from_value(stream_json())?;
     {
         let mut db = Store::open(&path)?;
-        db.initialize_rule(&rule, std::slice::from_ref(&stream), true)?;
-        db.queue(&rule, &[stream], Utc::now())?;
+        db.observe(&rule, &[stream], true, Utc::now())?;
         assert!(db.recent_history()?.is_empty());
     }
     let server = twitch_server().await;
@@ -307,5 +306,30 @@ async fn a_desktop_delivery_pending_at_shutdown_survives_an_offline_stream() -> 
     }
     assert_eq!(db.recent_history()?.len(), 1);
     assert!(db.pending_desktop(&rule.id)?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_failed_email_enqueue_rolls_back_first_scan_and_desktop_event() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("fixtures.db");
+    let mut db = Store::open(&path)?;
+    let fixture = Connection::open(&path)?;
+    fixture.execute_batch("CREATE TRIGGER fail_fixture BEFORE INSERT ON mail_events BEGIN SELECT RAISE(ABORT,'fixture'); END;")?;
+    let mut rule = rule("atomic");
+    rule.channels.email = true;
+    let stream: Stream = serde_json::from_value(stream_json())?;
+    let failed = db.observe(&rule, std::slice::from_ref(&stream), true, Utc::now());
+    assert!(failed.is_err());
+    for table in ["metadata", "desktop_events", "mail_events", "mail_batches"] {
+        assert_eq!(
+            fixture.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                .get::<_, i64>(0))?,
+            0
+        );
+    }
+    fixture.execute_batch("DROP TRIGGER fail_fixture")?;
+    db.observe(&rule, &[stream], true, Utc::now())?;
+    assert_eq!(db.pending_desktop(&rule.id)?.len(), 1);
     Ok(())
 }

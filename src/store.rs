@@ -116,6 +116,11 @@ impl Store {
                 FROM mail_events e JOIN mail_batches b ON e.batch_id=b.id WHERE b.state='sent';")?;
             tx.pragma_update(None, "user_version", 4)?;
             tx.commit()?;
+        } else {
+            // Mail uses additive schema revisions within the v4 event database.
+            let tx = connection.transaction()?;
+            crate::mail::migrate(&tx)?;
+            tx.commit()?;
         }
         Ok(Self {
             connection,
@@ -129,20 +134,21 @@ impl Store {
         streams: &[Stream],
         notify_existing: bool,
     ) -> Result<()> {
-        self.initialize_rule(&Rule::legacy(filter.clone()), streams, notify_existing)
+        let tx = self.connection.transaction()?;
+        Self::initialize_baseline(&tx, &filter.baseline_key(), streams, notify_existing)?;
+        tx.commit()?;
+        Ok(())
     }
 
-    pub(crate) fn initialize_rule(
-        &mut self,
-        rule: &Rule,
+    fn initialize_baseline(
+        transaction: &rusqlite::Transaction<'_>,
+        key: &str,
         streams: &[Stream],
         notify_existing: bool,
     ) -> Result<()> {
-        let key = rule.baseline_key();
-        let transaction = self.connection.transaction()?;
         if transaction.execute(
             "INSERT OR IGNORE INTO metadata(key,value) VALUES (?1,'true')",
-            [&key],
+            [key],
         )? > 0
             && !notify_existing
         {
@@ -152,7 +158,6 @@ impl Store {
                 insert.execute(params![key, stream.id])?;
             }
         }
-        transaction.commit()?;
         Ok(())
     }
 
@@ -179,14 +184,16 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) fn queue(
+    pub(crate) fn observe(
         &mut self,
         rule: &Rule,
         streams: &[Stream],
+        notify_existing: bool,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
         let key = rule.baseline_key();
         let tx = self.connection.transaction()?;
+        Self::initialize_baseline(&tx, &key, streams, notify_existing)?;
         {
             let mut baseline =
                 tx.prepare("SELECT 1 FROM baselines WHERE filter_key=?1 AND stream_id=?2")?;

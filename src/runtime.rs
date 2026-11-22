@@ -144,7 +144,8 @@ impl Control {
                     .parent()
                     .unwrap_or_else(|| Path::new("data"))
                     .to_path_buf(),
-            ),
+            )
+            .with_database(database_path.clone()),
             status: Mutex::new(Status {
                 app_id: "twitch-live-alert",
                 process_id: std::process::id(),
