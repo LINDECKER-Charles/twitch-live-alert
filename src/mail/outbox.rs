@@ -16,7 +16,7 @@ pub fn migrate(db: &Connection) -> Result<()> {
             rule_id TEXT NOT NULL, digest_slot INTEGER, policy TEXT NOT NULL,
             state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','sending','sent')),
             next_attempt INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-            sent_at INTEGER, last_error TEXT,
+            sent_at INTEGER, last_error TEXT, failed_at INTEGER,
             UNIQUE(rule_id,digest_slot)
         );
         CREATE INDEX IF NOT EXISTS mail_due ON mail_batches(state,next_attempt);
@@ -28,6 +28,14 @@ pub fn migrate(db: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS mail_members ON mail_events(batch_id);",
     )?;
+    let has_time: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('mail_batches') WHERE name='failed_at')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !has_time {
+        db.execute_batch("ALTER TABLE mail_batches ADD COLUMN failed_at INTEGER;")?;
+    }
     Ok(())
 }
 
@@ -201,10 +209,10 @@ fn finish(
 ) -> Result<()> {
     let db = connect(path)?;
     let count = match error {
-        None => db.execute("UPDATE mail_batches SET state='sent',sent_at=?,last_error=NULL WHERE id=? AND state='sending' AND attempts=?",params![now.timestamp(),id,attempt])?,
+        None => db.execute("UPDATE mail_batches SET state='sent',sent_at=?,last_error=NULL,failed_at=NULL WHERE id=? AND state='sending' AND attempts=?",params![now.timestamp(),id,attempt])?,
         Some(error) => {
             let backoff = (30 * 2_i64.pow(attempt.saturating_sub(1).min(7))).min(3600);
-            db.execute("UPDATE mail_batches SET state='pending',next_attempt=?,last_error=? WHERE id=? AND state='sending' AND attempts=?",params![now.timestamp()+backoff,error,id,attempt])?
+            db.execute("UPDATE mail_batches SET state='pending',next_attempt=?,last_error=?,failed_at=? WHERE id=? AND state='sending' AND attempts=?",params![now.timestamp()+backoff,error,now.timestamp(),id,attempt])?
         }
     };
     ensure!(count == 1, "Le bail de la livraison SMTP a expiré.");
