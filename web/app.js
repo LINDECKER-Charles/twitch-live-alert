@@ -1,10 +1,11 @@
 import { createRules } from "./rules.js";
 import { createMail } from "./mail.js";
 import { createConnection } from "./connection.js";
+import { createAnalytics } from "./analytics.js";
 import { createJournal, dateLabel, emptyState, icon, renderRows, text } from "./lists.js";
 
 const id = name => document.getElementById(name);
-const labels = { directs: "Directs", journal: "Journal", regles: "Règles", courriel: "Courriel", reglages: "Réglages", connexion: "Connexion Twitch" };
+const labels = { directs: "Directs", journal: "Journal", analytics: "Analytics", regles: "Règles", courriel: "Courriel", reglages: "Réglages", connexion: "Connexion Twitch" };
 const disconnection = "Le service local ne répond pas. Relancez Twitch Live Alert, puis réessayez.";
 const languages = new Intl.DisplayNames(["fr"], { type: "language" });
 // ISO 639-1 codes. Twitch also accepts the language "other".
@@ -19,6 +20,7 @@ const streamPageSize = 50;
 let visibleStreams = streamPageSize;
 let requestingStatus = false;
 const journal = createJournal(request, id);
+const analytics = createAnalytics(request, id);
 const rules = createRules(id, request, say, langName, refresh);
 const mail = createMail(id, request, say);
 const connection = createConnection(id, request, say, refresh);
@@ -246,6 +248,7 @@ function route(focus = true) {
   if (page === "connexion") connection.leave();
   if (page === "courriel") mail.clearSecrets();
   if (page === "regles") rules.closePicker();
+  if (page === "analytics") analytics.leave();
   page = next;
   for (const section of document.querySelectorAll("[data-page]")) section.hidden = section.dataset.page !== page;
   for (const link of document.querySelectorAll("[data-nav]")) {
@@ -260,6 +263,7 @@ function route(focus = true) {
   }
   controls();
   if (page === "journal") void journal.load();
+  if (page === "analytics") void analytics.load();
   if (page === "regles") void rules.load();
   if (page === "courriel") void mail.load();
   if (page === "connexion") void connection.load();
@@ -312,6 +316,13 @@ setInterval(() => {
   if (document.hidden) return;
   void refresh();
   if (page === "journal") void journal.load();
+  if (page === "analytics") analytics.refreshIfDue();
   if (page === "courriel") void mail.delivery();
 }, 5000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { void refresh(); if (page === "journal") void journal.load(); if (page === "courriel") void mail.delivery(); } });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  void refresh();
+  if (page === "journal") void journal.load();
+  if (page === "analytics") analytics.refreshIfDue();
+  if (page === "courriel") void mail.delivery();
+});

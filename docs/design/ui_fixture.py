@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 from urllib.parse import parse_qs, urlparse
@@ -14,7 +14,7 @@ ASSETS = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/category-picker.js": ("category-picker.js", "text/javascript; charset=utf-8"),
     **{f"/{name}.js": (f"{name}.js", "text/javascript; charset=utf-8")
-       for name in ["rules", "schedules", "connection", "mail"]},
+       for name in ["rules", "schedules", "connection", "mail", "analytics"]},
     "/lists.js": ("lists.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/mark.svg": ("mark.svg", "image/svg+xml"),
@@ -41,6 +41,60 @@ def rule(key, name, game_id, email=False):
                 language="fr", channels={"desktop": True, "email": email}, detection=schedule,
                 mail={"mode": "digest" if email else "instant", "schedule": schedule,
                       "digest_times": ["18:00"] if email else []})
+
+
+def analytics_sessions():
+    now = int(SAMPLE_TIME.timestamp())
+    groups = (
+        ("AtelierDuSonge", "Retour à Yharnam · Chasse aux trophées", 31, 0),
+        ("LanternePourpre", "Première exploration des calices", 8, 2),
+        ("LeVeilleur", "Exploration nocturne de l’Entre-terre", 5, 5),
+        ("ChasseursDesAnciensCalices", "Le dernier voyage dans les calices profonds", 2, 38),
+        ("MarcheuseDeBrume", "Retour au faubourg de la cathédrale", 1, 110),
+    )
+    sessions = []
+    for name, title, count, first_day in groups:
+        for index in range(count):
+            occurred_at = now - 6 * 3600 - (first_day + index * 5 // 7) * 86400 - index % 7 * 2400
+            duration = None if index % 9 == 1 else 2700 + (index * 37 + count * 17) % 195 * 60
+            sessions.append(dict(
+                stream_id=f"{name.casefold()}-{index + 1}", user_name=name,
+                title=f"{title} · Session {index + 1}", occurred_at=occurred_at,
+                started_at=occurred_at if duration is not None else None,
+                last_seen_at=occurred_at + duration if duration is not None else None,
+                duration_seconds=duration, peak_viewers=20 + index * 3 if duration is not None else None,
+            ))
+    return sorted(sessions, key=lambda session: session["occurred_at"], reverse=True)
+
+
+def analytics_payload(sessions, days, channel, offset):
+    # Fixture sessions occur around noon in Paris, on the same calendar day in UTC.
+    def session_day(session):
+        return datetime.fromtimestamp(session["occurred_at"], tz=timezone.utc).date()
+
+    today = SAMPLE_TIME.date()
+    cutoff = today - timedelta(days=max(days - 1, 0))
+    in_period = [session for session in sessions if not days or session_day(session) >= cutoff]
+    groups = {}
+    for session in in_period:
+        groups.setdefault(session["user_name"], []).append(session)
+
+    def summarize(rows):
+        durations = [row["duration_seconds"] for row in rows if row["duration_seconds"] is not None]
+        return dict(live_count=len(rows), measured_count=len(durations), total_seconds=sum(durations))
+
+    channels = [dict(key="login:" + name.casefold(), name=name, last_at=rows[0]["occurred_at"], **summarize(rows))
+                for name, rows in groups.items()]
+    channels.sort(key=lambda item: (-item["live_count"], item["name"]))
+    rows = [session for session in in_period if not channel or "login:" + session["user_name"].casefold() == channel]
+    weekdays = [0] * 7
+    for row in rows:
+        weekday = session_day(row).weekday()
+        weekdays[weekday] += 1
+    totals = dict(**summarize(rows), desktop_alerts=len(rows), email_alerts=len(rows) // 3)
+    earliest = session_day(in_period[-1]) if in_period else today
+    return dict(period_days=days or (today - earliest).days + 1, channels=channels, totals=totals, weekdays=weekdays,
+                sessions=rows[offset:offset + 25], offset=offset)
 
 
 class Fixture:
@@ -87,6 +141,11 @@ class Fixture:
         self.fail_categories = False
         self.held_category = None
         self.fail_history = False
+        self.analytics_sessions = analytics_sessions()
+        self.analytics_requests = []
+        self.fail_analytics = False
+        self.hold_analytics = False
+        self.held_analytics = None
         self.fail_test = False
         self.received = []
 
@@ -208,5 +267,18 @@ class Fixture:
             start = int(query["offset"][0])
             limit = int(query["limit"][0])
             route.fulfill(json={"items": rows[start:start + limit], "total": len(rows)})
+        elif endpoint == "analytics":
+            query = parse_qs(url.query)
+            days = int(query.get("days", ["30"])[0])
+            channel = query.get("channel", [""])[0]
+            offset = int(query.get("offset", ["0"])[0])
+            self.analytics_requests.append((days, channel, offset))
+            payload = analytics_payload(self.analytics_sessions, days, channel, offset)
+            if self.fail_analytics:
+                route.fulfill(status=503, json={"message": "Statistiques temporairement indisponibles."})
+            elif self.hold_analytics:
+                self.held_analytics = (route, payload)
+            else:
+                route.fulfill(json=payload)
         else:
             route.fulfill(status=404)

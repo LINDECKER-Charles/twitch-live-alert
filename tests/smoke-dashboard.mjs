@@ -91,7 +91,7 @@ test('le navigateur peut préparer une surveillance sur une installation neuve e
         ['/', 'text/html'], ['/style.css', 'text/css'], ['/app.js', 'javascript'],
         ['/lists.js', 'javascript'], ['/category-picker.js', 'javascript'], ['/rules.js', 'javascript'],
         ['/schedules.js', 'javascript'], ['/mail.js', 'javascript'], ['/connection.js', 'javascript'],
-        ['/mark.svg', 'image/svg+xml'],
+        ['/analytics.js', 'text/javascript'], ['/mark.svg', 'image/svg+xml'],
       ]) {
         const response = await request(path);
         assert.equal(response.status, 200, path);
@@ -101,6 +101,14 @@ test('le navigateur peut préparer une surveillance sur une installation neuve e
       const history = await request('/api/history?q=&offset=0&limit=10');
       assert.equal(history.status, 200);
       assert.deepEqual(await history.json(), { items: [], total: 0 });
+      const analytics = await request('/api/analytics');
+      assert.equal(analytics.status, 200);
+      assert.deepEqual(await analytics.json(), {
+        period_days: 30, channels: [], sessions: [], weekdays: Array(7).fill(0), offset: 0,
+        totals: { live_count: 0, measured_count: 0, total_seconds: 0, desktop_alerts: 0, email_alerts: 0 },
+      });
+      assert.equal((await request('/api/analytics?days=14')).status, 400);
+      assert.equal((await request('/api/analytics?offset=-1')).status, 400);
       const preferences = {
         category: status.category, language: '', poll_interval_seconds: 75,
         notify_existing_on_first_run: false, start_with_windows: status.start_with_windows,

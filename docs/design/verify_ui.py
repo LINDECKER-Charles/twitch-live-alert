@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -259,6 +260,169 @@ def check_mail(page, fixture, options):
     audit(page, options)
 
 
+def check_analytics(page, fixture, options):
+    page.set_viewport_size({"width": 1280, "height": 860})
+    nav = page.locator('[data-nav="analytics"]')
+    title = page.locator("#title-analytics")
+    period = page.locator("#analytics-period")
+    channel = page.locator("#analytics-channel")
+    channels = page.locator("#analytics-channels")
+    atelier_key = "login:atelierdusonge"
+    atelier_button = page.get_by_role("button", name="AtelierDuSonge", exact=True)
+    archived_button = page.get_by_role("button", name="ChasseursDesAnciensCalices", exact=True)
+    atelier = channels.get_by_role("row").filter(has=atelier_button)
+    archived = channels.get_by_role("row").filter(has=archived_button)
+    back = page.locator("#analytics-back")
+    scope = page.locator("#analytics-scope")
+    count = page.locator("#analytics-live-count")
+    total_duration = page.locator("#analytics-duration-total")
+    content = page.locator("#analytics-content")
+    message = page.locator("#analytics-message")
+    weekdays = page.locator("#analytics-weekdays > li")
+    sessions = page.locator("#analytics-sessions > li")
+    previous = page.locator("#analytics-previous")
+    next_page = page.locator("#analytics-next")
+
+    fixture.hold_analytics = True
+    with page.expect_request(lambda req: "/api/analytics?" in req.url):
+        nav.press("Enter")
+    expect(title).to_be_focused()
+    expect(nav).to_have_attribute("aria-current", "page")
+    expect(message).to_contain_text(re.compile(r"chargement", re.I))
+    expect(content).to_be_hidden()
+    route, payload = fixture.held_analytics
+    fixture.hold_analytics = False
+    route.fulfill(json=payload)
+    assert fixture.analytics_requests[-1] == (30, "", 0)
+    expect(count).to_have_text("44")
+    expect(period).to_have_value("30")
+    expect(channel).to_have_value("")
+    expect(scope).to_have_text("Toutes les chaînes")
+    expect(channels.get_by_role("button")).to_have_count(3)
+    expect(total_duration).to_have_text(re.compile(r"85\s*h\s*52"))
+    expect(atelier.get_by_role("cell").last).to_have_text(re.compile(r"63\s*h\s*08"))
+    expect(weekdays).to_have_count(7)
+    expect(weekdays.locator("strong")).to_have_text(["8", "5", "6", "6", "4", "9", "6"])
+    expect(page.locator("#analytics-desktop")).to_have_text("44")
+    expect(page.locator("#analytics-email")).to_have_text("14")
+    audit(page, options)
+    comparison = page.locator("#analytics-comparison")
+    if options.captures:
+        viewport = page.viewport_size
+        bottom = comparison.evaluate("el => Math.ceil(el.getBoundingClientRect().bottom + scrollY)")
+        page.set_viewport_size({"width": viewport["width"], "height": bottom + 12})
+        snapshot(page, options.captures, "analytics-comparaison")
+        page.set_viewport_size(viewport)
+        panel_capture(comparison, options.captures, "analytics-tableau")
+
+    page.keyboard.press("Tab")
+    expect(period).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(channel).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(atelier_button).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(scope).to_have_text("AtelierDuSonge")
+    expect(count).to_have_text("31")
+    expect(channel).to_have_value(atelier_key)
+    expect(channel).to_be_focused()
+    expect(total_duration).to_have_text(re.compile(r"63\s*h\s*08"))
+    expect(page.locator("#analytics-average")).to_have_text(re.compile(r"2\s*h\s*20"))
+    expect(page.locator("#analytics-coverage")).to_contain_text("27 directs mesurés sur 31")
+    expect(sessions).to_have_count(25)
+    expect(sessions.nth(0).locator("strong")).to_contain_text(re.compile(r"Session 1$"))
+    expect(sessions.nth(0)).to_contain_text(re.compile(r"3\s*h\s*02"))
+    expect(sessions.nth(1).locator("strong")).to_contain_text(re.compile(r"Session 2$"))
+    expect(sessions.nth(1)).to_contain_text("Durée inconnue")
+    assert fixture.analytics_requests[-1] == (30, atelier_key, 0)
+    expect(previous).to_be_disabled()
+    expect(next_page).to_be_enabled()
+    audit(page, options)
+    page.evaluate("window.scrollTo(0, 0)")
+    snapshot(page, options.captures, "analytics-chaine")
+
+    next_page.press("Enter")
+    expect(sessions).to_have_count(6)
+    expect(sessions.first).to_contain_text("Session 26")
+    expect(page.locator("#analytics-range")).to_contain_text("26")
+    expect(next_page).to_be_disabled()
+    expect(page.locator("#analytics-sessions-title")).to_be_focused()
+    assert fixture.analytics_requests[-1] == (30, atelier_key, 25)
+    view(page, "journal")
+    page.go_back()
+    expect(title).to_be_focused()
+    expect(channel).to_have_value(atelier_key)
+    expect(sessions.first).to_contain_text("Session 26")
+    previous.press("Enter")
+    expect(sessions).to_have_count(25)
+    expect(sessions.first).to_contain_text("Session 1")
+    assert fixture.analytics_requests[-1] == (30, atelier_key, 0)
+
+    back.press("Enter")
+    expect(scope).to_have_text("Toutes les chaînes")
+    expect(atelier_button).to_be_focused()
+    expect(count).to_have_text("44")
+
+    for days, expected_count in [(7, 20), (90, 46), (0, 47), (30, 44)]:
+        period.select_option(str(days))
+        expect(count).to_have_text(str(expected_count))
+        assert fixture.analytics_requests[-1] == (days, "", 0)
+
+    period.select_option("90")
+    archived_button.click()
+    expect(count).to_have_text("2")
+    period.select_option("7")
+    expect(channel).to_have_value("login:chasseursdesancienscalices")
+    expect(message).to_contain_text(re.compile(r"aucun", re.I))
+    expect(content).to_be_hidden()
+    period.select_option("90")
+    expect(count).to_have_text("2")
+    back.press("Enter")
+    expect(count).to_have_text("46")
+
+    fixture.fail_analytics = True
+    period.select_option("30")
+    retry = message.get_by_role("button", name="Réessayer")
+    expect(retry).to_be_visible()
+    expect(message).to_contain_text(re.compile(r"indisponible|impossible", re.I))
+    snapshot(page, options.captures, "analytics-erreur")
+    fixture.fail_analytics = False
+    retry.press("Enter")
+    expect(count).to_have_text("44")
+    assert fixture.analytics_requests[-2:] == [(30, "", 0)] * 2
+
+    saved = fixture.analytics_sessions
+    fixture.analytics_sessions = []
+    period.select_option("0")
+    expect(message).to_contain_text("Les directs détectés par vos règles apparaîtront ici.")
+    expect(content).to_be_hidden()
+    snapshot(page, options.captures, "analytics-vide")
+    fixture.analytics_sessions = saved
+    period.select_option("90")
+    expect(count).to_have_text("46")
+
+    for width in (390, 320):
+        page.set_viewport_size({"width": width, "height": 844})
+        page.evaluate("window.scrollTo(0, 0)")
+        no_overflow(page)
+        expect(archived.get_by_role("cell")).to_have_count(4)
+        audit(page, options)
+        snapshot(page, options.captures, f"analytics-comparaison-{width}")
+        panel_capture(comparison, options.captures, f"analytics-tableau-{width}")
+        archived_button.tap()
+        expect(scope).to_have_text("ChasseursDesAnciensCalices")
+        expect(sessions).to_have_count(2)
+        no_overflow(page)
+        page.evaluate("window.scrollTo(0, 0)")
+        snapshot(page, options.captures, f"analytics-chaine-{width}")
+        sessions.first.scroll_into_view_if_needed()
+        snapshot(page, options.captures, f"analytics-sessions-{width}")
+        audit(page, options)
+        back.tap()
+        expect(count).to_have_text("46")
+    page.set_viewport_size({"width": 1280, "height": 860})
+
+
 def run(browser, options):
     with options.manifest.open("rb") as manifest:
         fixture = Fixture(options.fixture_version or tomllib.load(manifest)["package"]["version"], options.art_dir)
@@ -395,6 +559,8 @@ def run(browser, options):
     snapshot(page, options.captures, "journal")
     page.go_back()
     expect(page.locator("#title-directs")).to_be_visible()
+
+    check_analytics(page, fixture, options)
 
     for width in (390, 320):
         page.set_viewport_size({"width": width, "height": 844})
