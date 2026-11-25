@@ -1,4 +1,5 @@
 use crate::{
+    analytics::{Analytics, AnalyticsQuery},
     credentials::Credentials,
     notification::DesktopNotifier,
     rules::Rule,
@@ -50,6 +51,7 @@ pub(crate) fn router(control: Arc<Control>, port: u16) -> Router {
         .route("/api/connection/disconnect", post(disconnect))
         .merge(control.mail.router())
         .route("/api/history", get(history))
+        .route("/api/analytics", get(analytics))
         .route("/api/credentials", post(credentials))
         .route("/api/settings", post(settings))
         .route("/api/monitoring", post(monitoring))
@@ -204,6 +206,13 @@ async fn history(
 ) -> Result<Json<History>, ApiError> {
     let q = query(input)?;
     Ok(Json(control.history(q.q, q.offset, q.limit).await?))
+}
+
+async fn analytics(
+    State(control): State<Arc<Control>>,
+    input: Result<Query<AnalyticsQuery>, QueryRejection>,
+) -> Result<Json<Analytics>, ApiError> {
+    Ok(Json(control.analytics(query(input)?).await?))
 }
 
 async fn credentials(

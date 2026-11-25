@@ -1,3 +1,4 @@
+mod analytics;
 pub mod config;
 mod credentials;
 pub mod http;

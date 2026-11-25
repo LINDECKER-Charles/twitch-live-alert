@@ -19,6 +19,7 @@ use settings::Settings;
 use worker::run_worker;
 
 use crate::{
+    analytics::{Analytics, AnalyticsQuery},
     config::{Config, Mode},
     credentials::Credentials,
     http,
@@ -382,6 +383,23 @@ impl Control {
             .and_then(Result::ok)
             .ok_or(ControlError::Operation(
                 "Impossible de lire le journal des alertes.",
+            ))
+    }
+
+    pub(crate) async fn analytics(&self, query: AnalyticsQuery) -> Result<Analytics, ControlError> {
+        if !query.is_valid() {
+            return Err(ControlError::Invalid("Période ou chaîne invalide."));
+        }
+        let path = self
+            .database_path
+            .clone()
+            .ok_or(ControlError::Operation(STORAGE_ERROR))?;
+        tokio::task::spawn_blocking(move || crate::analytics::read(&path, &query))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .ok_or(ControlError::Operation(
+                "Impossible de lire les statistiques.",
             ))
     }
 

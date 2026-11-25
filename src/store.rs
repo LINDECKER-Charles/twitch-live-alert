@@ -2,13 +2,17 @@ use crate::rules::{LEGACY_ID, LEGACY_NAME, Rule};
 use crate::twitch::{Stream, StreamFilter};
 use anyhow::{Context, Result, bail};
 use fs2::FileExt;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, functions::FunctionFlags, params};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, TransactionBehavior, functions::FunctionFlags, params,
+};
 use serde::Serialize;
 use std::{
     fs::{self, File, OpenOptions},
     path::Path,
     time::Duration,
 };
+
+mod sessions;
 
 pub struct Store {
     connection: Connection,
@@ -53,15 +57,14 @@ impl Store {
             Connection::open(path).context("Impossible d'ouvrir la base SQLite")?;
         connection.busy_timeout(Duration::from_secs(5))?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 4 {
+        if version > 5 {
             bail!("Version de base SQLite plus récente que ce service");
         }
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if version < 2 {
-            connection
-                .execute_batch(
-                    "BEGIN IMMEDIATE;
-                 CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                  CREATE TABLE IF NOT EXISTS deliveries (
                      stream_id TEXT PRIMARY KEY,
                      disposition TEXT NOT NULL CHECK(disposition IN ('sent', 'baseline')),
@@ -70,16 +73,13 @@ impl Store {
                  );
                  ALTER TABLE deliveries ADD COLUMN user_name TEXT;
                  ALTER TABLE deliveries ADD COLUMN title TEXT;
-                 ALTER TABLE deliveries ADD COLUMN url TEXT;
-                 PRAGMA user_version=2;
-                 COMMIT;",
-                )
-                .context("Impossible de migrer la base SQLite")?;
+                 ALTER TABLE deliveries ADD COLUMN url TEXT;",
+            )
+            .context("Impossible de migrer la base SQLite")?;
         }
         if version < 3 {
-            connection.execute_batch(
-                "BEGIN IMMEDIATE;
-                 UPDATE metadata SET key='initialized:fr:bloodborne' WHERE key='initialized';
+            tx.execute_batch(
+                "UPDATE metadata SET key='initialized:fr:bloodborne' WHERE key='initialized';
                  CREATE TABLE baselines (
                      filter_key TEXT NOT NULL,
                      stream_id TEXT NOT NULL,
@@ -87,14 +87,11 @@ impl Store {
                  );
                  INSERT INTO baselines(filter_key, stream_id)
                      SELECT 'initialized:fr:bloodborne', stream_id FROM deliveries WHERE disposition='baseline';
-                 DELETE FROM deliveries WHERE disposition='baseline';
-                 CREATE INDEX delivery_dates ON deliveries(recorded_at DESC) WHERE disposition='sent';
-                 PRAGMA user_version=3;
-                 COMMIT;"
+                 CREATE INDEX delivery_dates ON deliveries(recorded_at DESC) WHERE disposition='sent';"
             ).context("Impossible de migrer les filtres de surveillance")?;
         }
+        crate::mail::migrate(&tx)?;
         if version < 4 {
-            let tx = connection.transaction()?;
             tx.execute_batch(
                 "CREATE TABLE desktop_events (
                     rule_id TEXT NOT NULL, stream_id TEXT NOT NULL, rule_name TEXT NOT NULL,
@@ -108,20 +105,18 @@ impl Store {
                 "INSERT INTO desktop_events(rule_id,stream_id,rule_name,user_name,title,url,sent_at)
                  SELECT ?1,stream_id,?2,coalesce(user_name,'Chaîne inconnue'),coalesce(title,''),coalesce(url,''),recorded_at
                  FROM deliveries WHERE disposition='sent' ORDER BY rowid", params![LEGACY_ID, LEGACY_NAME])?;
-            crate::mail::migrate(&tx)?;
             tx.execute_batch("CREATE VIEW alert_history AS
                 SELECT rule_id, rule_name, 'desktop' channel, stream_id,user_name,title,url,sent_at recorded_at,rowid tie
                 FROM desktop_events WHERE sent_at IS NOT NULL
                 UNION ALL SELECT e.rule_id,e.rule_name,'email',e.stream_id,e.user_name,e.title,e.url,b.sent_at,e.rowid
                 FROM mail_events e JOIN mail_batches b ON e.batch_id=b.id WHERE b.state='sent';")?;
-            tx.pragma_update(None, "user_version", 4)?;
-            tx.commit()?;
-        } else {
-            // Mail uses additive schema revisions within the v4 event database.
-            let tx = connection.transaction()?;
-            crate::mail::migrate(&tx)?;
-            tx.commit()?;
         }
+        if version < 5 {
+            sessions::migrate(&tx, version < 3)
+                .context("Impossible de migrer les observations Twitch")?;
+            tx.pragma_update(None, "user_version", 5)?;
+        }
+        tx.commit()?;
         Ok(Self {
             connection,
             _lock: lock,
@@ -144,6 +139,7 @@ impl Store {
         notify_existing: bool,
     ) -> Result<()> {
         let tx = self.connection.transaction()?;
+        sessions::observe(&tx, streams, chrono::Utc::now())?;
         Self::initialize_baseline(&tx, &filter.baseline_key(), streams, notify_existing)?;
         tx.commit()?;
         Ok(())
@@ -178,18 +174,23 @@ impl Store {
     }
 
     pub fn mark_sent(&self, stream: &Stream) -> Result<()> {
-        self.connection.execute(
+        let tx = self.connection.unchecked_transaction()?;
+        let sent_at = chrono::Utc::now().timestamp();
+        tx.execute(
             "INSERT INTO desktop_events(rule_id,stream_id,rule_name,user_name,title,url,sent_at)
-             VALUES (?1,?2,?3,?4,?5,?6,unixepoch())",
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
             params![
                 LEGACY_ID,
                 stream.id,
                 LEGACY_NAME,
                 stream.user_name,
                 stream.title,
-                stream.url()
+                stream.url(),
+                sent_at,
             ],
         )?;
+        sessions::restore_sent_stream(&tx, stream, sent_at)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -202,6 +203,7 @@ impl Store {
     ) -> Result<()> {
         let key = rule.baseline_key();
         let tx = self.connection.transaction()?;
+        sessions::observe(&tx, streams, now)?;
         Self::initialize_baseline(&tx, &key, streams, notify_existing)?;
         {
             let mut baseline =
@@ -254,8 +256,14 @@ impl Store {
         .collect()
     }
 
-    pub(crate) fn confirm_desktop(&self, rule_id: &str, stream_id: &str) -> Result<()> {
-        self.connection.execute("UPDATE desktop_events SET sent_at=unixepoch(),snapshot=NULL WHERE rule_id=?1 AND stream_id=?2 AND sent_at IS NULL", params![rule_id,stream_id])?;
+    pub(crate) fn confirm_desktop(&mut self, rule_id: &str, stream_id: &str) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let sent_at = chrono::Utc::now().timestamp();
+        sessions::restore_pending_desktop(&tx, rule_id, stream_id, sent_at)?;
+        tx.execute("UPDATE desktop_events SET sent_at=?3,snapshot=NULL WHERE rule_id=?1 AND stream_id=?2 AND sent_at IS NULL", params![rule_id,stream_id,sent_at])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -357,6 +365,13 @@ mod migration_tests {
         let legacy = &store.recent_history()?[0];
         assert_eq!(legacy.recorded_at, 123);
         assert!(legacy.url.is_empty());
+        let mut sessions = store.connection.prepare(
+            "SELECT first_seen_at, last_seen_at FROM stream_sessions ORDER BY stream_id",
+        )?;
+        let times: Vec<(i64, Option<i64>)> = sessions
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(times, [(123, None), (124, Some(124))]);
         Ok(())
     }
 }
