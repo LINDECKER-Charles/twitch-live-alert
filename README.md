@@ -34,10 +34,13 @@ Après validation, la page indique l’état de la connexion et permet de la vé
 | --- | --- |
 | Directs | Voir les chaînes du dernier relevé, leur règle, leur titre et leur audience, puis ouvrir une chaîne. |
 | Journal | Rechercher une alerte et retrouver la règle et le canal associés à sa livraison. |
+| Analytics | Comparer la fréquence et la durée des directs par chaîne sur 7, 30 ou 90 jours ou sur tout l’historique. Sélectionner une chaîne pour consulter ses diffusions. |
 | Règles | Créer, modifier, activer, désactiver ou supprimer une règle. Lire les plages de détection et le programme de courriel de chaque règle, avec son fuseau et son état dans la plage. |
 | Courriel | Renseigner le serveur SMTP et les destinataires, composer un modèle, afficher un aperçu et envoyer un test. |
 | Réglages | Régler l’intervalle global et le premier relevé, choisir le démarrage avec Windows. |
 | Connexion Twitch | Vérifier l’état de la connexion, remplacer les identifiants ou déconnecter l’application. |
+
+Dans **Analytics**, un direct compte une seule fois, même s’il a déclenché plusieurs alertes. La durée minimale va du début indiqué par Twitch au dernier relevé où le direct était visible. Les anciennes alertes dont la durée est inconnue comptent dans la fréquence. La moyenne des durées utilise uniquement les directs mesurés.
 
 Le service vérifie Twitch toutes les 60 secondes par défaut. Il lit les pages successives de la catégorie. Une diffusion très courte peut passer entre deux relevés et le classement des chaînes peut changer pendant la pagination. La veille du PC et la fermeture de session interrompent la surveillance. En cas de limitation de débit, la prochaine tentative est différée. [Liste des directs](https://dev.twitch.tv/docs/api/reference/streams#get-streams) · [Pagination et limites de débit](https://dev.twitch.tv/docs/api/guide/)
 

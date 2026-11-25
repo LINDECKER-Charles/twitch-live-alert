@@ -1,4 +1,4 @@
-# Ergonomie de la console 0.3.0
+# Ergonomie de la console
 
 [English overview](../en/INTERFACE.md)
 
@@ -6,6 +6,7 @@
 | --- | --- |
 | Directs | Lire l’état de la surveillance, demander un relevé, mettre en pause ou reprendre. Chaque ligne nomme la règle du direct, la chaîne, le titre, l’heure de début et l’audience disponible. « Gérer les règles » ouvre la configuration. |
 | Journal | Rechercher une chaîne ou un titre dans l’historique local. Chaque alerte indique sa règle et son canal. Une page contient au plus 50 entrées. |
+| Analytics | Choisir une période, comparer les fréquences et les durées des directs, puis ouvrir une chaîne pour explorer son historique, son activité par jour et les notifications associées. Une page d’historique contient au plus 25 directs. |
 | Règles | Créer, modifier, désactiver, réactiver ou supprimer une règle identifiée par son nom. La suppression demande confirmation sur sa ligne. Le formulaire de règle occupe la page et « Enregistrer la règle » applique le brouillon. |
 | Courriel | Lire l’état des envois automatiques, paramétrer le serveur, l’expéditeur et les destinataires, préparer les modèles et les essayer. L’aperçu utilise un direct d’exemple. « Envoyer un test » contacte les destinataires enregistrés. Un échec en file indique la règle concernée et la prochaine tentative quand le service la connaît. |
 | Réglages | Configurer l’intervalle de 15 à 3 600 secondes, le comportement au premier relevé et le démarrage Windows. Tester la notification Windows sur ce PC. |
@@ -17,4 +18,6 @@ Les plages de **détection** déterminent quand interroger Twitch pour la règle
 
 La liste affiche séparément le programme de détection et celui du courriel. Un horaire qui dépasse minuit porte la mention « +1 j ». Un résumé repliable donne accès à toutes les plages ou heures supplémentaires. « Activée » qualifie le choix enregistré. « Dans la plage de détection » et « Hors plage de détection » sont calculés d’après le fuseau de la règle.
 
-Le rail garde la destination courante visible. Sur mobile, les six destinations se répartissent sur deux rangées. Le changement de page déplace le focus sur le titre. La navigation au clavier, le retour du navigateur et le lien d’évitement fonctionnent sur l’ensemble des destinations. Lors d’une interruption du service, la date et la liste du dernier relevé restent lisibles. [Fiche de parcours](fiches/surveillance.md) · [Captures et vérifications](PLANCHE.md)
+Le rail garde la destination courante visible. Sur mobile, les trois destinations de surveillance occupent une rangée et les quatre destinations de configuration la suivante. Le changement de page déplace le focus sur le titre. La navigation au clavier, le retour du navigateur et le lien d’évitement fonctionnent sur l’ensemble des destinations. Lors d’une interruption du service, la date et la liste du dernier relevé restent lisibles. [Fiche de parcours](fiches/surveillance.md) · [Captures et vérifications](PLANCHE.md)
+
+Dans Analytics, une **chaîne** désigne un diffuseur Twitch. Un **canal de notification** désigne Windows ou le courriel. La **durée observée** va du début Twitch au dernier relevé où la chaîne diffusait encore. « Durée inconnue » indique que les traces disponibles ne permettent pas de calculer cet intervalle. La **fréquence** ramène le nombre de directs à une semaine pour la période affichée. [Fiche Analytics et lexique](fiches/analytics.md)

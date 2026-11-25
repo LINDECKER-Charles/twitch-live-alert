@@ -23,6 +23,8 @@ Les listes de règles utilisent le même rythme de séparateurs que les directs.
 
 ## Sources et fondations
 
+Dans Analytics, le bandeau mauve conserve la hiérarchie des chiffres de surveillance et aligne les quatre indicateurs sur une rangée de bureau. Les histogrammes indiquent la valeur au-dessus de chaque barre et utilisent la même échelle pour les sept jours. À 390 et 320 px, le nom de chaîne occupe une ligne du comparatif, suivi de ses quatre mesures sur deux colonnes. [Spécimen Analytics](PLANCHE.md#analytics)
+
 Le [pictogramme](../../web/mark.svg) représente trois barres de signal obliques. Le bandeau reprend les barres en perspective sur un plateau quadrillé. L’image est décorative et fixe. Les valeurs de vérification et les états visibles proviennent du service. L’ensemble fonctionne avec les ressources embarquées et Segoe UI ou sa police système de remplacement.
 
 Les [jetons CSS](../../web/style.css) définissent les surfaces, le texte, les états et le focus. Les titres de destination vont de 29 à 40 px, les titres de panneau de 15 à 16 px. Les compteurs et valeurs de temps utilisent des chiffres tabulaires. Les séparateurs et le rythme des rangées structurent les listes longues.

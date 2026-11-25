@@ -1,6 +1,14 @@
-# Planche de la console 0.3.0
+# Planche de la console
 
 [English overview](../en/INTERFACE.md)
+
+## Analytics
+
+![Comparaison des chaînes sur trente jours avec volumes, fréquences, durées observées et activité hebdomadaire](analytics.png)
+
+La capture utilise les relevés fictifs de la recette du 25 novembre 2026. Le bandeau reprend les surfaces du panneau de surveillance et le comparatif conserve le rythme des listes du journal. Les sept colonnes du graphique affichent également leur valeur. Sur mobile, les libellés du tableau accompagnent chaque ligne et les deux filtres restent accessibles au-dessus du résumé. [Composants HTML](../../web/index.html) · [Mesures et interactions](../../web/analytics.js) · [Jetons et styles](../../web/style.css) · [Fiche de parcours](fiches/analytics.md)
+
+## Console 0.3.0
 
 ![Directs de démonstration avec leur règle et les derniers canaux de notification](apercu-directs.png)
 

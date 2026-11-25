@@ -2,11 +2,12 @@
 
 [Français](../design/PLANCHE.md) · [User guide](../../README.en.md)
 
-Twitch Live Alert uses the same local dashboard in WebView2 and in a browser. The sidebar groups monitoring (**Directs**, **Journal**) and configuration (**Règles**, **Courriel**, **Réglages**, **Connexion Twitch**). On a narrow screen those links move above the content. The heading, current navigation item and breadcrumb name the same destination.
+Twitch Live Alert uses the same local dashboard in WebView2 and in a browser. The sidebar groups monitoring (**Directs**, **Journal**, **Analytics**) and configuration (**Règles**, **Courriel**, **Réglages**, **Connexion Twitch**). On a narrow screen those links move above the content. The heading, current navigation item and breadcrumb name the same destination.
 
 | View | Layout and interaction |
 | --- | --- |
 | Current streams and history | Stream rows show the channel, title, source rule, available Twitch details and a link to the channel. The history supports search and pagination. |
+| Analytics | Choose a period and a channel to see how often it streams, which weekdays it started, and the duration measured for each stream. Older entries can have an unknown duration. |
 | Rules | Each row shows its enabled state, category, language, notification channels, detection window and email schedule. A multi-window summary expands for details. Editing keeps the detection schedule separate from the email policy. |
 | Category search | A dialog shows the search field, category names and Twitch artwork. Use the arrow keys to move through results, Enter to select or Escape to return. Loading, empty, failed and missing-image states have a text equivalent. |
 | Email | Connection and delivery settings are separate from the plain-text template editor and its preview. The queue status can explain a rejected delivery and show the next attempt. |
